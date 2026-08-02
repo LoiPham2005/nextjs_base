@@ -76,6 +76,12 @@ db-studio:
 db-seed:
 	pnpm db:seed
 
+db-seed-prod:
+	pnpm db:seed:prod
+
+db-seed-dev:
+	pnpm db:seed:dev
+
 # Docker Commands
 docker-build:
 	docker compose build
