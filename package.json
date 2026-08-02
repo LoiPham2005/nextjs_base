@@ -9,10 +9,13 @@
     "lint": "eslint \"src/**/*.{js,jsx,ts,tsx}\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
