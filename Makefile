@@ -2,7 +2,7 @@
         test-coverage format format-check \
         db-generate db-migrate db-deploy db-studio db-seed db-seed-dev db-seed-prod db-reset \
         docker-build docker-up docker-down docker-logs docker-ps \
-        docker-deploy docker-size docker-clean \
+        realtime docker-deploy docker-size docker-clean \
         vps-deploy vps-logs vps-status vps-files
 
 help:
@@ -16,6 +16,7 @@ help:
 	@echo "  make install         - Cài đặt dependencies"
 	@echo "  make dev             - Chạy dev server (http://localhost:3000)"
 	@echo "  make start           - Chạy bản build production"
+	@echo "  make realtime        - Chạy máy chủ WebSocket (tiến trình riêng, cổng 3002)"
 	@echo "  make build           - Build production"
 	@echo ""
 	@echo "--- CHẤT LƯỢNG ---"
@@ -70,6 +71,9 @@ dev:
 
 start:
 	pnpm start
+
+realtime:
+	pnpm realtime:dev
 
 build:
 	pnpm build

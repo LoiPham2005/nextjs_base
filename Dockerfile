@@ -41,7 +41,7 @@ COPY . .
 # giá trị env ở thời điểm này. Bỏ qua validation để build không đòi .env.
 ENV SKIP_ENV_VALIDATION=1 \
     DATABASE_URL=postgresql://build:build@localhost:5432/build
-RUN pnpm db:generate && pnpm build
+RUN pnpm db:generate && pnpm build && pnpm realtime:build
 
 # ---------------------------------------------------------------------------
 # migrator — image một-lần-chạy để apply migration trước khi web khởi động.
@@ -71,6 +71,25 @@ RUN npm init -y > /dev/null \
 # nên thiếu biến phải báo lỗi ngay chứ không được âm thầm trỏ vào localhost.
 ENV NODE_ENV=production
 CMD ["npx", "prisma", "migrate", "deploy"]
+
+# ---------------------------------------------------------------------------
+# realtime — máy chủ WebSocket, tiến trình RIÊNG với web.
+#
+# Tách vì App Router không giữ được kết nối lâu dài, và vì deploy web không
+# được phép làm rớt socket đang mở. esbuild gói thành một file duy nhất nên
+# image không cần node_modules của app.
+# ---------------------------------------------------------------------------
+FROM base AS realtime
+ENV NODE_ENV=production \
+    REALTIME_PORT=3002
+RUN addgroup -g 1001 -S nodejs \
+ && adduser -u 1001 -S -G nodejs nextjs
+COPY --from=builder --chown=nextjs:nodejs /app/realtime/dist ./realtime/dist
+USER nextjs
+EXPOSE 3002
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "realtime/dist/server.cjs"]
 
 # ---------------------------------------------------------------------------
 # runner — image production, chỉ chứa output standalone

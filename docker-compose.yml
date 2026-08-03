@@ -76,5 +76,53 @@ services:
       start_period: 25s
       retries: 3
 
+  # Redis: BẮT BUỘC khi chạy từ 2 instance realtime trở lên. Không có nó, client
+  # nối vào instance A sẽ không nhận được tin phát từ instance B — im lặng,
+  # không lỗi nào cả.
+  redis:
+    image: redis:7-alpine
+    container_name: nextjs_prisma_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  realtime:
+    build:
+      context: .
+      target: realtime
+    container_name: nextjs_prisma_realtime
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      REALTIME_PORT: 3002
+      REDIS_URL: redis://redis:6379
+      REALTIME_CORS_ORIGIN: ${REALTIME_CORS_ORIGIN:-http://localhost:3000}
+      # Phải TRÙNG KHỚP với app chính: token do web/mobile cấp được verify ở đây.
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET là bắt buộc}
+    ports:
+      - "${REALTIME_PORT:-3002}:3002"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
 volumes:
   postgres_data:

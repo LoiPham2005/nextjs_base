@@ -67,6 +67,7 @@ nextjs_base/
 │   │   └── logger.ts          # Log JSON một dòng, tự che trường nhạy cảm
 │   ├── schemas/               # Zod schema (nguồn sự thật cho validation)
 │   └── services/              # Tầng nghiệp vụ — nơi duy nhất gọi Prisma
+├── realtime/                  # Máy chủ WebSocket — TIẾN TRÌNH RIÊNG, ngoài Next
 ├── Dockerfile                 # 4 stage: deps / builder / migrator / runner
 └── docker-compose.yml         # postgres + migrate (chạy 1 lần) + web
 ```
@@ -225,6 +226,56 @@ một server block nginx trỏ tới `127.0.0.1:3000` là xong. Chỉ cần nh�
 - **App chỉ lắng nghe `127.0.0.1`.** Reverse proxy là cửa duy nhất ra Internet;
   bind `0.0.0.0` là để lộ cổng 3000, đi vòng qua cả TLS lẫn rate limit.
 - Yêu cầu **Node ≥ 22.9**. Node 20 đã hết vòng đời hỗ trợ từ tháng 4/2026.
+
+---
+
+## Realtime (WebSocket)
+
+Tiến trình **riêng**, không nằm trong Next.js — xem [realtime/](realtime/).
+
+```bash
+pnpm realtime:dev      # cổng 3002
+pnpm realtime:build    # gói thành một file bằng esbuild
+pnpm realtime:start    # chạy bản đã build
+```
+
+**Vì sao phải tách khỏi Next.** App Router là mô hình request/response, không
+giữ được kết nối WebSocket lâu dài. Nhét socket vào Next bằng custom server thì
+phá `output: "standalone"`, và **mỗi lần deploy web là rớt sạch kết nối đang
+mở** — với app chat thì đó là lỗi nghiêm trọng.
+
+**Vì sao KHÔNG dùng NestJS.** Tiến trình này chỉ làm một việc và nó dùng lại
+`verifySession` cùng tầng service của app chính, nên web, mobile và socket chung
+đúng một token, một tầng nghiệp vụ. Cân nhắc framework có DI khi nó phình ra
+nhiều gateway, queue consumer và cron — không phải chỉ vì có socket.
+
+**Vì sao `realtime/` nằm ngoài `src/`.** `src/` là ứng dụng Next; mọi thứ trong
+đó nằm trong đồ thị module của Next. Để bên ngoài thì việc lỡ import một thứ chỉ
+chạy được trong Next (`next/headers`, `server-only`) sẽ lộ ngay lúc bundle, thay
+vì build xanh rồi chết lúc chạy.
+
+### Điểm cần biết
+
+- **Xác thực ở handshake**, không phải sau khi đã nối. Cho nối trước rồi mới
+  kiểm tra nghĩa là kẻ tấn công vẫn giữ được kết nối mở và tiêu tài nguyên.
+- **`REDIS_URL` bắt buộc từ instance thứ hai trở đi.** Thiếu nó thì client nối
+  vào máy A không nhận được tin phát từ máy B — im lặng, không lỗi nào.
+- **`connectionStateRecovery`** bật sẵn: mạng rớt rồi quay lại trong 2 phút thì
+  nối tiếp phiên cũ. Quan trọng với mobile.
+- **`ack` callback** là cách client phân biệt "đã gửi" với "mất mạng".
+
+### Ba thứ quyết định app chat sống hay chết — chưa có trong khung này
+
+Đây là khung kết nối, không phải app chat hoàn chỉnh. Trước khi làm chat thật:
+
+1. **Push notification.** Socket chết ngay khi người dùng thoát app; mỗi tin
+   nhắn phải đi hai đường — socket cho người online, FCM/APNs cho người offline.
+2. **ULID do client sinh** làm khoá idempotent, để gửi lại khi mất mạng không
+   tạo tin nhắn trùng.
+3. **Sequence number theo từng hội thoại** để sắp xếp — đừng tin đồng hồ máy
+   client.
+
+Chọn sai framework thì sửa được; thiếu ba thứ trên thì phải làm lại từ đầu.
 
 ---
 

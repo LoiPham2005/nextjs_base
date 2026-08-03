@@ -3,6 +3,7 @@ node_modules
 
 # build outputs
 .next
+realtime/dist
 out
 dist
 build
