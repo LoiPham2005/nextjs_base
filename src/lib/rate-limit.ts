@@ -7,6 +7,21 @@
  * container; khi scale ngang thì thay `hit()` bằng Redis INCR + EXPIRE mà
  * không phải đụng tới nơi gọi.
  */
+export type RateLimitOptions = { limit: number; windowSeconds: number };
+
+/**
+ * Ngưỡng cho từng loại thao tác, khai báo một lần duy nhất.
+ *
+ * Web và mobile là hai cửa vào khác nhau nhưng phải chịu chung một chính
+ * sách. Trước đây các con số này nằm rải rác ở cả Server Action lẫn route
+ * handler, nên siết ngưỡng đăng nhập mà quên một chỗ là cửa còn lại vẫn mở.
+ */
+export const RATE_LIMITS = {
+  login: { limit: 5, windowSeconds: 300 },
+  register: { limit: 5, windowSeconds: 3600 },
+  refresh: { limit: 30, windowSeconds: 300 },
+} as const satisfies Record<string, RateLimitOptions>;
+
 type Bucket = { count: number; resetAt: number };
 
 const buckets = new Map<string, Bucket>();
@@ -26,10 +41,7 @@ export type RateLimitResult = {
   retryAfterSeconds: number;
 };
 
-export function rateLimit(
-  key: string,
-  options: { limit: number; windowSeconds: number },
-): RateLimitResult {
+export function rateLimit(key: string, options: RateLimitOptions): RateLimitResult {
   const now = Date.now();
   const windowMs = options.windowSeconds * 1000;
 

@@ -30,13 +30,11 @@ export async function DELETE(request: Request, { params }: RouteContext) {
     const { id } = await params;
     const session = await requireApiAdmin(request);
 
-    if (session.sub === id) {
-      throw apiErrors.conflict("Bạn không thể tự xoá tài khoản đang đăng nhập");
-    }
-
-    // Refresh token có onDelete: Cascade nên mọi phiên của user này biến mất
-    // cùng lúc — xoá tài khoản mà token còn sống được thì vô nghĩa.
-    await userService.delete(id);
+    // Luật "không tự xoá chính mình" do service giữ; handleApiError đổi
+    // SelfDeletionError thành 409. Refresh token có onDelete: Cascade nên mọi
+    // phiên của user này biến mất cùng lúc — xoá tài khoản mà token còn sống
+    // được thì vô nghĩa.
+    await userService.delete(id, session.sub);
 
     return apiOk({ id });
   } catch (error) {

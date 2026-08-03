@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as UserServiceModule from "@/services/user.service";
+import { SelfDeletionError } from "@/services/user.service";
 
 /**
  * Đây là bài test quan trọng nhất trong repo.
@@ -103,13 +104,16 @@ describe("deleteUserAction", () => {
     expect(userService.delete).not.toHaveBeenCalled();
   });
 
-  it("không cho admin tự xoá chính mình", async () => {
+  it("truyền actorId xuống service để service tự áp luật tự-xoá", async () => {
     vi.mocked(getSession).mockResolvedValue(adminSession);
+    vi.mocked(userService.delete).mockRejectedValue(new SelfDeletionError());
 
     const result = await deleteUserAction(adminSession.sub);
 
+    // Action không tự kiểm luật nữa — nó chỉ chuyển tiếp danh tính người thao
+    // tác và hiển thị lỗi service trả về.
+    expect(userService.delete).toHaveBeenCalledWith(adminSession.sub, adminSession.sub);
     expect(result.error).toContain("tự xoá");
-    expect(userService.delete).not.toHaveBeenCalled();
   });
 
   it("cho phép admin xoá người khác", async () => {
@@ -126,6 +130,6 @@ describe("deleteUserAction", () => {
     const result = await deleteUserAction("victim-id");
 
     expect(result.error).toBeUndefined();
-    expect(userService.delete).toHaveBeenCalledWith("victim-id");
+    expect(userService.delete).toHaveBeenCalledWith("victim-id", adminSession.sub);
   });
 });

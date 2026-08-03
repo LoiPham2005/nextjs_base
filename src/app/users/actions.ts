@@ -5,7 +5,12 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth";
 import { logger } from "@/lib/logger";
 import { createUserSchema } from "@/schemas/user.schema";
-import { userService, UserAlreadyExistsError, UserNotFoundError } from "@/services/user.service";
+import {
+  userService,
+  SelfDeletionError,
+  UserAlreadyExistsError,
+  UserNotFoundError,
+} from "@/services/user.service";
 
 /**
  * Mỗi Server Action là một HTTP endpoint công khai.
@@ -68,14 +73,13 @@ export async function deleteUserAction(id: string): Promise<{ error?: string }> 
   if (denied) return denied;
 
   const session = await getSession();
-  if (session?.sub === id) {
-    return { error: "Bạn không thể tự xoá tài khoản đang đăng nhập." };
-  }
 
   try {
-    await userService.delete(id);
+    // Luật "không tự xoá chính mình" nằm trong service, không nằm ở đây —
+    // nếu chép lại tại từng cửa vào thì sớm muộn hai bên cũng lệch nhau.
+    await userService.delete(id, session?.sub ?? null);
   } catch (error) {
-    if (error instanceof UserNotFoundError) {
+    if (error instanceof SelfDeletionError || error instanceof UserNotFoundError) {
       return { error: error.message };
     }
     logger.error("Delete user failed", error, { targetUserId: id });

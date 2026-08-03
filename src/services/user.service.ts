@@ -67,7 +67,20 @@ export class UserService {
     return prisma.user.findUnique({ where: { email }, select: PUBLIC_USER_FIELDS });
   }
 
-  async delete(id: string): Promise<PublicUser> {
+  /**
+   * @param actorId Người đang thực hiện thao tác, hoặc `null` nếu là tiến
+   * trình hệ thống (seed, cron, script quản trị).
+   *
+   * Tham số này BẮT BUỘC chứ không phải tuỳ chọn: luật "không tự xoá chính
+   * mình" là luật nghiệp vụ, nên nó phải sống ở đây thay vì được chép lại ở
+   * từng cửa vào. Bắt buộc truyền thì TypeScript ép mọi nơi gọi phải nói rõ
+   * ai đang thao tác, và không thể vô tình bỏ sót luật.
+   */
+  async delete(id: string, actorId: string | null): Promise<PublicUser> {
+    if (actorId !== null && actorId === id) {
+      throw new SelfDeletionError();
+    }
+
     try {
       return await prisma.user.delete({ where: { id }, select: PUBLIC_USER_FIELDS });
     } catch (error) {
@@ -94,6 +107,13 @@ export class UserNotFoundError extends Error {
   constructor(id: string) {
     super(`Không tìm thấy người dùng có id "${id}"`);
     this.name = "UserNotFoundError";
+  }
+}
+
+export class SelfDeletionError extends Error {
+  constructor() {
+    super("Bạn không thể tự xoá tài khoản đang đăng nhập");
+    this.name = "SelfDeletionError";
   }
 }
 

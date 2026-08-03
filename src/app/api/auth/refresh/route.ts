@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { enforceRateLimit } from "@/lib/api/auth";
 import { apiErrors, apiOk, handleApiError, parseJsonBody } from "@/lib/api/response";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 import { ACCESS_TOKEN_MAX_AGE_SECONDS, signSession } from "@/lib/session";
 import { tokenService } from "@/services/token.service";
 
@@ -18,7 +19,7 @@ const refreshSchema = z.object({
  */
 export async function POST(request: Request) {
   try {
-    enforceRateLimit(request, "api:refresh", { limit: 30, windowSeconds: 300 });
+    enforceRateLimit(request, "api:refresh", RATE_LIMITS.refresh);
 
     const { refreshToken } = await parseJsonBody(request, refreshSchema);
 

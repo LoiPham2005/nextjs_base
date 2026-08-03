@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createSession, destroySession } from "@/lib/auth";
 import { logger } from "@/lib/logger";
-import { rateLimit, resetRateLimit } from "@/lib/rate-limit";
+import { RATE_LIMITS, rateLimit, resetRateLimit } from "@/lib/rate-limit";
 import { loginSchema, registerSchema } from "@/schemas/auth.schema";
 import { authService, InvalidCredentialsError } from "@/services/auth.service";
 import { UserAlreadyExistsError } from "@/services/user.service";
@@ -40,7 +40,7 @@ export async function loginAction(
   formData: FormData,
 ): Promise<AuthFormState> {
   const rateLimitKey = await getClientKey("login");
-  const limit = rateLimit(rateLimitKey, { limit: 5, windowSeconds: 300 });
+  const limit = rateLimit(rateLimitKey, RATE_LIMITS.login);
 
   if (!limit.success) {
     logger.warn("Login rate limit exceeded", { key: rateLimitKey });
@@ -82,7 +82,7 @@ export async function registerAction(
   formData: FormData,
 ): Promise<AuthFormState> {
   const rateLimitKey = await getClientKey("register");
-  const limit = rateLimit(rateLimitKey, { limit: 5, windowSeconds: 3600 });
+  const limit = rateLimit(rateLimitKey, RATE_LIMITS.register);
 
   if (!limit.success) {
     return {

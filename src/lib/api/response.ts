@@ -3,7 +3,11 @@ import { z } from "zod";
 import { logger } from "@/lib/logger";
 import { InvalidCredentialsError } from "@/services/auth.service";
 import { RefreshTokenReuseError } from "@/services/token.service";
-import { UserAlreadyExistsError, UserNotFoundError } from "@/services/user.service";
+import {
+  SelfDeletionError,
+  UserAlreadyExistsError,
+  UserNotFoundError,
+} from "@/services/user.service";
 
 /**
  * Định dạng response thống nhất cho toàn bộ REST API.
@@ -115,7 +119,7 @@ export function handleApiError(error: unknown, context?: Record<string, unknown>
     );
   }
 
-  if (error instanceof UserAlreadyExistsError) {
+  if (error instanceof UserAlreadyExistsError || error instanceof SelfDeletionError) {
     return handleApiError(apiErrors.conflict(error.message));
   }
 

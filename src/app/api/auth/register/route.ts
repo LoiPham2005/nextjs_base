@@ -2,6 +2,7 @@ import { enforceRateLimit } from "@/lib/api/auth";
 import { apiOk, handleApiError, parseJsonBody } from "@/lib/api/response";
 import { issueTokenPair } from "@/lib/api/tokens";
 import { logger } from "@/lib/logger";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 import { registerSchema } from "@/schemas/auth.schema";
 import { authService } from "@/services/auth.service";
 
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    enforceRateLimit(request, "api:register", { limit: 5, windowSeconds: 3600 });
+    enforceRateLimit(request, "api:register", RATE_LIMITS.register);
 
     const body = await parseJsonBody(request, registerSchema);
 
