@@ -2,6 +2,7 @@
         test-coverage format format-check \
         db-generate db-migrate db-deploy db-studio db-seed db-seed-dev db-seed-prod db-reset \
         docker-build docker-up docker-down docker-logs docker-ps \
+        docker-size docker-clean \
         vps-deploy vps-logs vps-status vps-files
 
 help:
@@ -39,6 +40,8 @@ help:
 	@echo "  make docker-down     - Dừng và xoá container"
 	@echo "  make docker-logs     - Xem log realtime"
 	@echo "  make docker-ps       - Trạng thái container"
+	@echo "  make docker-size     - Xem dung lượng image và rác build còn sót"
+	@echo "  make docker-clean    - Xoá image mồ côi do build lỗi (an toàn)"
 	@echo ""
 	@echo "--- DEPLOY: VPS TRỰC TIẾP (systemd + Caddy) ---"
 	@echo "  make vps-deploy      - Deploy trên máy chủ (pull, migrate, build, restart)"
@@ -135,6 +138,21 @@ docker-logs:
 
 docker-ps:
 	docker compose ps
+
+docker-size:
+	@echo "── Image của dự án:"
+	@docker images --format '   {{.Repository}}:{{.Tag}}\t{{.Size}}' | grep nextjs_base || echo "   (chưa build)"
+	@echo "── Image mồ côi (mỗi lần build lỗi để lại một bản):"
+	@echo "   số lượng: $$(docker images -f 'dangling=true' -q | wc -l | tr -d ' ')"
+	@docker system df
+
+# Mỗi lần `docker build` thất bại giữa chừng, các layer đã tạo trở thành image
+# không tên (<none>) và nằm lại vĩnh viễn. Vài lần build lỗi là mất chục GB.
+# Lệnh này CHỈ xoá image không được tag và không container nào dùng — image
+# đang chạy và image có tên đều an toàn.
+docker-clean:
+	docker image prune -f
+	docker builder prune -f
 
 # --- VPS trực tiếp ---------------------------------------------------------
 # Các target dưới đây chạy TRÊN MÁY CHỦ, không phải máy dev.

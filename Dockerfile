@@ -1,15 +1,17 @@
-# Ảnh Debian slim thay vì Alpine: Prisma cần OpenSSL và engine dựng sẵn cho
-# glibc. Trên Alpine (musl) phải khai báo thêm binaryTargets và vẫn hay gặp lỗi
-# thiếu engine lúc chạy. Vài chục MB đổi lấy việc build luôn chạy được.
-FROM node:24-bookworm-slim AS base
+# Alpine dùng được kể từ khi lên Prisma 7.
+#
+# Trước đây phải dùng Debian slim vì Prisma 6 nạp query engine viết bằng Rust,
+# và bản dựng sẵn cho musl hay thiếu/lệch — phải khai báo thêm binaryTargets mà
+# vẫn gặp lỗi lúc chạy. Prisma 7 bỏ hẳn engine đó, kết nối qua driver adapter
+# thuần Node, nên ràng buộc glibc biến mất.
+#
+# Đổi base: 349MB → 135MB, áp dụng cho MỌI stage.
+FROM node:24-alpine AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     NEXT_TELEMETRY_DISABLED=1
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates openssl \
- && rm -rf /var/lib/apt/lists/* \
- && corepack enable
+RUN corepack enable
 WORKDIR /app
 
 # ---------------------------------------------------------------------------
@@ -46,14 +48,29 @@ RUN pnpm db:generate && pnpm build
 # Image runtime không có Prisma CLI nên cần stage riêng.
 # ---------------------------------------------------------------------------
 FROM base AS migrator
-ENV NODE_ENV=production
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json ./
-# Cố tình KHÔNG kế thừa DATABASE_URL giả của stage deps: stage này chạy thật,
-# nên thiếu biến phải báo lỗi ngay chứ không được âm thầm trỏ vào localhost.
 COPY prisma.config.ts ./
 COPY prisma ./prisma/
-CMD ["pnpm", "exec", "prisma", "migrate", "deploy"]
+
+# Cố tình KHÔNG chép node_modules từ stage deps: bộ đó chứa cả next,
+# typescript, vitest, sharp... — hơn 1.5GB cho một image chỉ chạy đúng một câu
+# lệnh. `migrate deploy` chỉ cần Prisma CLI và dotenv (prisma.config.ts import).
+#
+# package.json của dự án được đặt ở /tmp chứ KHÔNG phải /app, vì
+# `npm install <pkg>` cài luôn mọi dependency khai báo trong package.json ở
+# thư mục hiện tại — chỉ cần nó nằm cạnh là cả cây next/eslint/vite chui vào
+# image. `npm init -y` tạo một package.json rỗng để npm không có gì để kéo theo.
+COPY package.json /tmp/app-package.json
+RUN npm init -y > /dev/null \
+ && npm install --no-save --loglevel=error \
+      "prisma@$(node -p "require('/tmp/app-package.json').devDependencies.prisma")" \
+      "dotenv@$(node -p "require('/tmp/app-package.json').devDependencies.dotenv")" \
+ && npm cache clean --force \
+ && rm /tmp/app-package.json
+
+# Cố tình KHÔNG kế thừa DATABASE_URL giả của stage deps: stage này chạy thật,
+# nên thiếu biến phải báo lỗi ngay chứ không được âm thầm trỏ vào localhost.
+ENV NODE_ENV=production
+CMD ["npx", "prisma", "migrate", "deploy"]
 
 # ---------------------------------------------------------------------------
 # runner — image production, chỉ chứa output standalone
@@ -65,8 +82,9 @@ ENV NODE_ENV=production \
     # điều đó nghĩa là không nhận được request nào từ bên ngoài.
     HOSTNAME=0.0.0.0
 
-RUN groupadd --system --gid 1001 nodejs \
- && useradd --system --uid 1001 --gid nodejs nextjs
+# Cú pháp busybox của Alpine, không phải groupadd/useradd của Debian.
+RUN addgroup -g 1001 -S nodejs \
+ && adduser -u 1001 -S -G nodejs nextjs
 
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
