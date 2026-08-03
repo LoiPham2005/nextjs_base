@@ -1,39 +1,80 @@
-version: '3.8'
+# `version:` đã bị Compose v2 bỏ và sẽ in cảnh báo nếu còn giữ.
+
+x-database-url: &database-url
+  DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-nextjs_prisma_base}?schema=public
 
 services:
   postgres:
     image: postgres:16-alpine
     container_name: nextjs_prisma_postgres
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: nextjs_prisma_base
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-nextjs_prisma_base}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-nextjs_prisma_base}",
+        ]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+
+  # Chạy một lần rồi thoát. `web` đợi service này kết thúc thành công, nên
+  # schema luôn được apply trước khi có request đầu tiên.
+  migrate:
+    build:
+      context: .
+      target: migrator
+    container_name: nextjs_prisma_migrate
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   web:
     build:
       context: .
-      dockerfile: Dockerfile
+      target: runner
     container_name: nextjs_prisma_web
-    restart: always
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
     environment:
+      <<: *database-url
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/nextjs_prisma_base?schema=public
       PORT: 3000
     ports:
-      - "3000:3000"
+      - "${APP_PORT:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 25s
+      retries: 3
 
 volumes:
   postgres_data:
