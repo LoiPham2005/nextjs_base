@@ -1,8 +1,13 @@
+import "dotenv/config";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { seedProd } from "./seeds/seed-prod";
 import { seedDev } from "./seeds/seed-dev";
 
-const prisma = new PrismaClient();
+// Prisma 7 bắt buộc dùng driver adapter, kể cả cho script chạy ngoài ứng dụng.
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
 
 /**
  * Điểm vào duy nhất cho seeding; chọn bộ dữ liệu qua biến SEED_TYPE

@@ -4,11 +4,10 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 
-  // Bỏ comment khi chạy sau connection pooler (PgBouncer, Neon, Supabase).
-  // Prisma Migrate cần kết nối trực tiếp; runtime vẫn dùng url ở trên.
-  // directUrl = env("DIRECT_DATABASE_URL")
+  // Prisma 7 không còn nhận `url` ở đây nữa. Chuỗi kết nối chuyển sang
+  // `prisma.config.ts` (cho CLI/Migrate) và driver adapter trong
+  // `src/lib/prisma.ts` (cho runtime).
 }
 
 enum Role {

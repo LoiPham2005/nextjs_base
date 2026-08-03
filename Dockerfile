@@ -1,7 +1,7 @@
 # Ảnh Debian slim thay vì Alpine: Prisma cần OpenSSL và engine dựng sẵn cho
 # glibc. Trên Alpine (musl) phải khai báo thêm binaryTargets và vẫn hay gặp lỗi
 # thiếu engine lúc chạy. Vài chục MB đổi lấy việc build luôn chạy được.
-FROM node:22-bookworm-slim AS base
+FROM node:24-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
@@ -17,7 +17,13 @@ WORKDIR /app
 # ---------------------------------------------------------------------------
 FROM base AS deps
 COPY package.json pnpm-lock.yaml ./
+# prisma.config.ts là bắt buộc từ Prisma 7: `postinstall` chạy `prisma generate`,
+# mà lệnh đó nạp file config này để biết schema nằm ở đâu.
+COPY prisma.config.ts ./
 COPY prisma ./prisma/
+# Config đọc DATABASE_URL ngay lúc nạp. `generate` không hề kết nối database,
+# nhưng vẫn cần biến tồn tại — nên đặt giá trị giả CHỈ cho bước build.
+ENV DATABASE_URL=postgresql://build:build@localhost:5432/build
 # Cố tình KHÔNG dùng `--mount=type=cache`: nó bắt buộc phải có BuildKit, mà
 # BuildKit lại cần plugin buildx — không phải máy nào cũng có (Colima chẳng
 # hạn). Layer cache theo package.json + lockfile đã đủ nhanh cho hầu hết thay đổi.
@@ -31,7 +37,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Lúc build không có secret thật, và cũng không cần: không dòng code nào đọc
 # giá trị env ở thời điểm này. Bỏ qua validation để build không đòi .env.
-ENV SKIP_ENV_VALIDATION=1
+ENV SKIP_ENV_VALIDATION=1 \
+    DATABASE_URL=postgresql://build:build@localhost:5432/build
 RUN pnpm db:generate && pnpm build
 
 # ---------------------------------------------------------------------------
@@ -42,6 +49,9 @@ FROM base AS migrator
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
+# Cố tình KHÔNG kế thừa DATABASE_URL giả của stage deps: stage này chạy thật,
+# nên thiếu biến phải báo lỗi ngay chứ không được âm thầm trỏ vào localhost.
+COPY prisma.config.ts ./
 COPY prisma ./prisma/
 CMD ["pnpm", "exec", "prisma", "migrate", "deploy"]
 

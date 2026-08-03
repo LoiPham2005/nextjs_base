@@ -3,8 +3,8 @@
 Bộ khung Next.js 16 (App Router) + Prisma + PostgreSQL cho ứng dụng web có đăng
 nhập, đã siết bảo mật và có sẵn đường mở REST API cho mobile.
 
-**Ngăn xếp:** Next.js 16 · React 19 · TypeScript (strict) · Prisma 6 · Zod 4 ·
-jose (JWT session) · Tailwind CSS 4 · Vitest 4 · pnpm 10 · Docker
+**Ngăn xếp:** Next.js 16 · React 19 · TypeScript (strict) · Prisma 7 · Zod 4 ·
+jose (JWT session) · Tailwind CSS 4 · Vitest 4 · pnpm 10 · Node 24 · Docker
 
 ---
 
@@ -37,6 +37,7 @@ Tài khoản sau khi `db:seed:dev`:
 
 ```
 nextjs_base/
+├── prisma.config.ts           # Cấu hình Prisma CLI (Prisma 7 bỏ `url` khỏi schema)
 ├── prisma/
 │   ├── schema.prisma          # Schema database
 │   ├── migrations/            # Migration đã commit — bắt buộc để deploy
@@ -315,8 +316,6 @@ lạ thành 500 mà không để lộ nội dung ra ngoài.
 
 ## Việc còn để ngỏ
 
-- **Prisma 7** đã phát hành (repo đang dùng 6.19). Bản 7 đổi generator và cần
-  driver adapter — nên làm thành một PR riêng để review kỹ, không gộp vào đây.
 - **Rate limit dùng Redis** khi chạy nhiều hơn một instance.
 - **Dọn refresh token hết hạn**: `tokenService.purgeExpired()` đã sẵn sàng,
   chỉ cần gắn vào một cron. Bảng `refresh_tokens` chỉ tăng, mỗi lần đăng nhập
