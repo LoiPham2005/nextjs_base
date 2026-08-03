@@ -1,18 +1,49 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { UserService, UserAlreadyExistsError } from "./user.service";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
+import { UserAlreadyExistsError, UserNotFoundError, UserService } from "./user.service";
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: {
-      findUnique: vi.fn(),
       create: vi.fn(),
       findMany: vi.fn(),
+      findUnique: vi.fn(),
       delete: vi.fn(),
+      count: vi.fn(),
     },
   },
 }));
 
+// bcrypt cost 12 tốn ~250ms mỗi lần gọi — quá đắt cho unit test.
+vi.mock("@/lib/crypto", () => ({
+  CryptoUtils: {
+    hashPassword: vi.fn().mockResolvedValue("hashed"),
+    comparePassword: vi.fn(),
+    fakeCompare: vi.fn(),
+  },
+}));
+
 import { prisma } from "@/lib/prisma";
+import { CryptoUtils } from "@/lib/crypto";
+
+function prismaError(code: string) {
+  return new Prisma.PrismaClientKnownRequestError("boom", {
+    code,
+    clientVersion: "test",
+  });
+}
+
+// `prisma.user.create` được khai báo kiểu theo cả model, kể cả khi service
+// dùng `select` để loại bỏ password. Mock vì thế phải khớp model đầy đủ.
+const sampleUser = {
+  id: "u-1",
+  email: "test@example.com",
+  password: null,
+  name: "Test",
+  role: "USER" as const,
+  createdAt: new Date("2026-01-01"),
+  updatedAt: new Date("2026-01-01"),
+};
 
 describe("UserService", () => {
   let service: UserService;
@@ -22,33 +53,71 @@ describe("UserService", () => {
     vi.clearAllMocks();
   });
 
-  it("creates a user successfully", async () => {
-    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
-    vi.mocked(prisma.user.create).mockResolvedValue({
-      id: "u-1",
-      email: "test@example.com",
-      password: "hashed",
-      name: "Test",
-      role: "USER",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+  describe("create", () => {
+    it("tạo user và hash mật khẩu", async () => {
+      vi.mocked(prisma.user.create).mockResolvedValue(sampleUser);
+
+      const user = await service.create({ email: "test@example.com", password: "secret123" });
+
+      expect(CryptoUtils.hashPassword).toHaveBeenCalledWith("secret123");
+      expect(user.email).toBe("test@example.com");
+
+      // Kiểm tra cái thật sự quan trọng: query gửi xuống Prisma không hề chọn
+      // cột password, nên nó không thể rò ra ngoài service.
+      const callArgs = vi.mocked(prisma.user.create).mock.calls[0]?.[0];
+      expect(callArgs?.select).not.toHaveProperty("password");
+      expect(callArgs?.select).toMatchObject({ id: true, email: true, role: true });
     });
 
-    const user = await service.create({ email: "test@example.com", password: "secret" });
-    expect(user.email).toBe("test@example.com");
+    it("lưu password null khi không truyền mật khẩu", async () => {
+      vi.mocked(prisma.user.create).mockResolvedValue(sampleUser);
+
+      await service.create({ email: "test@example.com" });
+
+      expect(CryptoUtils.hashPassword).not.toHaveBeenCalled();
+      expect(vi.mocked(prisma.user.create).mock.calls[0]?.[0]).toMatchObject({
+        data: { password: null },
+      });
+    });
+
+    it("đổi lỗi P2002 của Prisma thành UserAlreadyExistsError", async () => {
+      vi.mocked(prisma.user.create).mockRejectedValue(prismaError("P2002"));
+
+      await expect(service.create({ email: "dup@example.com" })).rejects.toThrow(
+        UserAlreadyExistsError,
+      );
+    });
+
+    it("không nuốt lỗi lạ", async () => {
+      vi.mocked(prisma.user.create).mockRejectedValue(new Error("connection lost"));
+
+      await expect(service.create({ email: "x@example.com" })).rejects.toThrow("connection lost");
+    });
   });
 
-  it("throws UserAlreadyExistsError on duplicate email", async () => {
-    vi.mocked(prisma.user.findUnique).mockResolvedValue({
-      id: "existing",
-      email: "dup@example.com",
-      password: "",
-      name: null,
-      role: "USER",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+  describe("list", () => {
+    it("mặc định lấy 50 bản ghi", async () => {
+      vi.mocked(prisma.user.findMany).mockResolvedValue([]);
+
+      await service.list();
+
+      expect(vi.mocked(prisma.user.findMany).mock.calls[0]?.[0]).toMatchObject({ take: 50 });
     });
 
-    await expect(service.create({ email: "dup@example.com" })).rejects.toThrow(UserAlreadyExistsError);
+    it("chặn trần ở 100 dù caller yêu cầu nhiều hơn", async () => {
+      vi.mocked(prisma.user.findMany).mockResolvedValue([]);
+
+      await service.list({ take: 100_000 });
+
+      expect(vi.mocked(prisma.user.findMany).mock.calls[0]?.[0]).toMatchObject({ take: 100 });
+    });
+  });
+
+  describe("delete", () => {
+    it("đổi lỗi P2025 thành UserNotFoundError", async () => {
+      vi.mocked(prisma.user.delete).mockRejectedValue(prismaError("P2025"));
+
+      await expect(service.delete("missing")).rejects.toThrow(UserNotFoundError);
+    });
   });
 });
