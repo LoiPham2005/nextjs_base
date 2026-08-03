@@ -80,7 +80,20 @@ export async function proxy(request: NextRequest) {
 // Node.js runtime và việc set `runtime` sẽ khiến build lỗi.
 export const config = {
   matcher: [
-    // Bỏ qua asset tĩnh và mọi file có phần mở rộng.
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.[\\w]+$).*)",
+    /*
+     * Bỏ qua:
+     *   - asset tĩnh và mọi file có phần mở rộng
+     *   - /api/** — CÓ CHỦ ĐÍCH.
+     *
+     * Proxy nói chuyện bằng redirect và HTML, còn client API (app Flutter)
+     * cần JSON kèm đúng status code. Nếu để /api đi qua đây, một token hết
+     * hạn sẽ trả về 307 dẫn tới trang login thay vì 401 — lỗi rất khó nhìn ra
+     * từ phía mobile vì nó trông như request thành công.
+     *
+     * Đổi lại, MỌI route handler trong src/app/api phải tự kiểm quyền bằng
+     * `requireApiUser()` / `requireApiAdmin()`. Header bảo mật không mất đi:
+     * chúng được set ở next.config.mjs cho toàn bộ đường dẫn.
+     */
+    "/((?!api/|_next/static|_next/image|favicon.ico|.*\\.[\\w]+$).*)",
   ],
 };
