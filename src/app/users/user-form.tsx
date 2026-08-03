@@ -16,7 +16,11 @@ export function UserForm() {
   }, [isPending, state]);
 
   return (
-    <form ref={formRef} action={formAction} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <form
+      ref={formRef}
+      action={formAction}
+      style={{ display: "flex", flexDirection: "column", gap: 16 }}
+    >
       <div className="form-grid">
         <div>
           <input
@@ -47,7 +51,16 @@ export function UserForm() {
       </div>
 
       {state.error && (
-        <div style={{ padding: "10px 14px", borderRadius: "var(--radius-md)", background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "var(--danger-color)", fontSize: "0.9rem" }}>
+        <div
+          style={{
+            padding: "10px 14px",
+            borderRadius: "var(--radius-md)",
+            background: "rgba(239, 68, 68, 0.15)",
+            border: "1px solid rgba(239, 68, 68, 0.3)",
+            color: "var(--danger-color)",
+            fontSize: "0.9rem",
+          }}
+        >
           ⚠️ {state.error}
         </div>
       )}

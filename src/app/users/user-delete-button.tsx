@@ -7,7 +7,10 @@ export function UserDeleteButton({ id, email }: { id: string; email: string }) {
   const [isPending, startTransition] = useTransition();
 
   const handleDelete = () => {
-    if (typeof window !== "undefined" && window.confirm(`Bạn có chắc chắn muốn xoá người dùng ${email}?`)) {
+    if (
+      typeof window !== "undefined" &&
+      window.confirm(`Bạn có chắc chắn muốn xoá người dùng ${email}?`)
+    ) {
       startTransition(async () => {
         const res = await deleteUserAction(id);
         if (res.error) {
