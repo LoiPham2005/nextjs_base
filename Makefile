@@ -164,4 +164,4 @@ vps-files:
 	@echo "  sudo cp deploy/Caddyfile /etc/caddy/Caddyfile   # đổi example.com"
 	@echo "  sudo systemctl reload caddy"
 	@echo ""
-	@echo "Đã có nginx trên máy? Dùng deploy/nginx.conf thay cho Caddyfile."
+	@echo "VPS đã chạy nginx? Viết server block trỏ 127.0.0.1:3000, nhớ ghi đè X-Forwarded-For."

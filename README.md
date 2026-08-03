@@ -146,12 +146,12 @@ pnpm db:reset         # XOÁ SẠCH rồi tạo lại
 
 Hỗ trợ hai cách, chọn một:
 
-|              | **Docker**                            | **VPS trực tiếp**                      |
-| ------------ | ------------------------------------- | -------------------------------------- |
-| Hợp khi      | máy chưa có gì, muốn dựng nhanh       | VPS đã có Postgres/nginx sẵn, muốn nhẹ |
-| Postgres     | container kèm theo                    | tự cài trên máy                        |
-| RAM tiêu tốn | nhiều hơn                             | ít hơn                                 |
-| Migration    | service `migrate` tự chạy trước `web` | `scripts/deploy-vps.sh` chạy           |
+|              | **Docker**                            | **VPS trực tiếp**                |
+| ------------ | ------------------------------------- | -------------------------------- |
+| Hợp khi      | máy chưa có gì, muốn dựng nhanh       | VPS đã có sẵn Postgres, muốn nhẹ |
+| Postgres     | container kèm theo                    | tự cài trên máy                  |
+| RAM tiêu tốn | nhiều hơn                             | ít hơn                           |
+| Migration    | service `migrate` tự chạy trước `web` | `scripts/deploy-vps.sh` chạy     |
 
 ### Cách 1 — Docker
 
@@ -185,19 +185,23 @@ sudo systemctl reload caddy
 ./scripts/deploy-vps.sh     # pull → install → migrate → build → restart → health check
 ```
 
-**Caddy hay nginx?** Mặc định dùng **Caddy** — nó tự xin và tự gia hạn chứng
-chỉ Let's Encrypt ngay trong tiến trình, không cần certbot cũng không cần cron.
-Cert hết hạn lúc 3 giờ sáng là nguyên nhân downtime phổ biến nhất của deploy
-thủ công, và Caddy xoá hẳn nguyên nhân đó. Cấu hình cũng ngắn hơn nhiều.
+**Vì sao Caddy chứ không phải nginx.** Caddy tự xin và tự gia hạn chứng chỉ
+Let's Encrypt ngay trong tiến trình của nó — không certbot, không cron. Cert
+hết hạn lúc 3 giờ sáng là nguyên nhân downtime phổ biến nhất của deploy thủ
+công, và Caddy xoá hẳn nguyên nhân đó. Cấu hình cũng ngắn hơn khoảng 4 lần.
 
-Dùng [deploy/nginx.conf](deploy/nginx.conf) thay thế **khi VPS đã chạy nginx
-cho dự án khác** — lúc đó thêm Caddy sẽ tranh cổng 80/443, và giải pháp đúng là
-thêm một server block nginx.
+Repo cố tình chỉ có **một** file reverse proxy. Giữ sẵn thêm một file nginx
+"phòng khi cần" nghe hợp lý, nhưng file thứ hai không ai chạy là file không ai
+kiểm chứng — nó sẽ âm thầm sai theo thời gian.
 
-Dù chọn cái nào, **reverse proxy phải ghi đè `X-Forwarded-For` bằng IP thật**
-(`{remote_host}` ở Caddy, `$remote_addr` ở nginx). Nếu chỉ nối thêm vào header
-sẵn có, client tự gửi header giả là né sạch rate limit đăng nhập. Cả hai file
-mẫu đều đã xử lý đúng.
+Nếu VPS đã chạy nginx cho dự án khác (thêm Caddy sẽ tranh cổng 80/443), viết
+một server block nginx trỏ tới `127.0.0.1:3000` là xong. Chỉ cần nhớ đúng một
+điều bên dưới.
+
+> **Bẫy chung cho mọi reverse proxy:** phải **ghi đè** `X-Forwarded-For` bằng
+> IP thật — `{remote_host}` ở Caddy, `$remote_addr` ở nginx (KHÔNG dùng
+> `$proxy_add_x_forwarded_for`). Nếu chỉ nối thêm vào header sẵn có, client tự
+> gửi header giả là né sạch rate limit đăng nhập.
 
 #### Vài điểm dễ vấp
 
