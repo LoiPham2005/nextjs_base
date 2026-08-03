@@ -32,8 +32,42 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  refreshTokens RefreshToken[]
+
   // Trang danh sách sắp xếp theo createdAt desc; không có index thì mỗi lần
   // mở trang là một lần full table scan + sort.
   @@index([createdAt])
   @@map("users")
+}
+
+/// Refresh token cho client mobile.
+///
+/// Vì sao cần bảng này thay vì chỉ cấp một JWT hạn dài: JWT đã ký thì không
+/// thu hồi được. Người dùng mất điện thoại, hoặc bạn cần đăng xuất từ xa —
+/// không có cách nào vô hiệu hoá một JWT còn hạn. Refresh token nằm trong
+/// database nên xoá là mất hiệu lực ngay.
+model RefreshToken {
+  id String @id @default(cuid())
+
+  /// SHA-256 của token, KHÔNG phải token gốc. Rò database thì kẻ tấn công
+  /// cũng không dùng được. Dùng SHA-256 chứ không phải bcrypt vì token là
+  /// chuỗi ngẫu nhiên 256-bit (không brute-force được) và ta cần tra cứu
+  /// bằng index, chứ không so sánh từng dòng.
+  tokenHash String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime
+  /// Được set khi token bị xoay vòng hoặc khi người dùng đăng xuất.
+  revokedAt DateTime?
+
+  /// Ghi lại để người dùng nhận ra phiên nào là của thiết bị nào.
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }

@@ -28,7 +28,18 @@ const envSchema = z.object({
     .string()
     .min(32, "SESSION_SECRET phải dài tối thiểu 32 ký tự (dùng: openssl rand -base64 48)"),
 
+  /** Hạn của cookie session trên web. */
   SESSION_MAX_AGE_DAYS: z.coerce.number().int().positive().max(365).default(7),
+
+  /**
+   * Hạn access token cấp cho client mobile. Ngắn có chủ đích: JWT đã ký thì
+   * không thu hồi được, nên thứ giới hạn thiệt hại khi lộ token chính là hạn
+   * của nó. Việc giữ đăng nhập lâu dài do refresh token đảm nhiệm.
+   */
+  ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().max(1440).default(15),
+
+  /** Hạn refresh token. Thu hồi được vì nó nằm trong database. */
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().max(365).default(30),
 
   ADMIN_EMAIL: z.email("ADMIN_EMAIL không hợp lệ").optional(),
   ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD tối thiểu 8 ký tự").optional(),

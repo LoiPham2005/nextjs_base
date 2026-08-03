@@ -3,10 +3,12 @@ import { z } from "zod";
 import { env, isProduction } from "./env";
 
 /**
- * Ký và xác thực session token.
+ * Ký và xác thực session token (JWT).
  *
- * File này cố ý KHÔNG import `next/headers` hay Prisma: nó cũng chạy trong
- * middleware (Edge runtime), nơi cả hai đều không dùng được.
+ * File này cố ý KHÔNG import `next/headers` hay Prisma: nó chạy được ở cả ba
+ * chỗ — Proxy, Server Component, và route handler cho mobile. Phần dính cookie
+ * nằm riêng trong `auth.ts`, phần dính header Authorization nằm trong
+ * `api/auth.ts`. Nhờ vậy thêm client mới không phải sửa file này.
  */
 
 export const SESSION_COOKIE_NAME = "session";
@@ -14,7 +16,17 @@ export const SESSION_COOKIE_NAME = "session";
 const ALGORITHM = "HS256";
 const secretKey = new TextEncoder().encode(env.SESSION_SECRET);
 
+/** Hạn của cookie session trên web. */
 export const SESSION_MAX_AGE_SECONDS = env.SESSION_MAX_AGE_DAYS * 24 * 60 * 60;
+
+/**
+ * Hạn của access token cấp cho client mobile — ngắn hơn hẳn cookie web.
+ *
+ * JWT đã ký thì không thu hồi được, nên hạn càng dài thì cửa sổ thiệt hại khi
+ * lộ token càng lớn. Bù lại bằng refresh token (xem `token.service.ts`): nó
+ * lưu trong database nên thu hồi được ngay lập tức.
+ */
+export const ACCESS_TOKEN_MAX_AGE_SECONDS = env.ACCESS_TOKEN_TTL_MINUTES * 60;
 
 const sessionPayloadSchema = z.object({
   sub: z.string().min(1),
@@ -25,12 +37,21 @@ const sessionPayloadSchema = z.object({
 export type SessionPayload = z.infer<typeof sessionPayloadSchema>;
 export type UserRole = SessionPayload["role"];
 
-export async function signSession(payload: SessionPayload): Promise<string> {
+/**
+ * @param maxAgeSeconds Hạn token. Mặc định là hạn của cookie web; route handler
+ * cho mobile truyền `ACCESS_TOKEN_MAX_AGE_SECONDS`.
+ */
+export async function signSession(
+  payload: SessionPayload,
+  maxAgeSeconds: number = SESSION_MAX_AGE_SECONDS,
+): Promise<string> {
+  const issuedAt = Math.floor(Date.now() / 1000);
+
   return new SignJWT({ email: payload.email, role: payload.role })
     .setProtectedHeader({ alg: ALGORITHM })
     .setSubject(payload.sub)
-    .setIssuedAt()
-    .setExpirationTime(`${env.SESSION_MAX_AGE_DAYS}d`)
+    .setIssuedAt(issuedAt)
+    .setExpirationTime(issuedAt + maxAgeSeconds)
     .sign(secretKey);
 }
 
@@ -43,6 +64,7 @@ export async function verifySession(token: string | undefined): Promise<SessionP
       algorithms: [ALGORITHM],
     });
 
+    // Chữ ký đúng không có nghĩa là cấu trúc đúng — vẫn phải validate.
     const parsed = sessionPayloadSchema.safeParse(payload);
     return parsed.success ? parsed.data : null;
   } catch {
