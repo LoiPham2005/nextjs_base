@@ -4,25 +4,35 @@ import { seedDev } from "./seeds/seed-dev";
 
 const prisma = new PrismaClient();
 
+/**
+ * Điểm vào duy nhất cho seeding; chọn bộ dữ liệu qua biến SEED_TYPE
+ * (`pnpm db:seed:dev` / `pnpm db:seed:prod` đã set sẵn).
+ *
+ * Mặc định nghiêng về "prod" khi NODE_ENV=production: nhầm lẫn ở đây phải dẫn
+ * tới việc nạp ít dữ liệu hơn, không phải đổ user giả vào database thật.
+ */
 async function main() {
-  const args = process.argv.slice(2);
-  const seedType = process.env.SEED_TYPE || (args.includes("--prod") ? "prod" : "dev");
-  const isProdEnv = process.env.NODE_ENV === "production";
+  const seedType =
+    process.env.SEED_TYPE ?? (process.env.NODE_ENV === "production" ? "prod" : "dev");
 
-  if (seedType === "prod" || (isProdEnv && seedType !== "dev")) {
-    console.log("🔒 Target environment: PRODUCTION");
+  if (seedType !== "dev" && seedType !== "prod") {
+    throw new Error(`SEED_TYPE không hợp lệ: "${seedType}" (chỉ nhận "dev" hoặc "prod")`);
+  }
+
+  console.log(`🌱 Seed type: ${seedType.toUpperCase()}`);
+
+  if (seedType === "prod") {
     await seedProd(prisma);
   } else {
-    console.log("🛠️ Target environment: DEVELOPMENT / TEST");
     await seedDev(prisma);
   }
 }
 
 main()
-  .catch((e) => {
-    console.error("❌ Seeding failed:", e);
-    process.exit(1);
+  .catch((error: unknown) => {
+    console.error("❌ Seeding thất bại:", error);
+    process.exitCode = 1;
   })
-  .finally(async () => {
-    await prisma.$disconnect();
+  .finally(() => {
+    void prisma.$disconnect();
   });
