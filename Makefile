@@ -1,40 +1,56 @@
-.PHONY: help install dev build start lint typecheck test format format-check \
-        db-generate db-migrate db-studio db-seed \
+.PHONY: help setup install dev build start check lint lint-fix typecheck test test-watch \
+        test-coverage format format-check \
+        db-generate db-migrate db-deploy db-studio db-seed db-seed-dev db-seed-prod db-reset \
         docker-build docker-up docker-down docker-logs docker-ps
 
-# Mặc định hiển thị danh sách các lệnh
 help:
 	@echo "========================================================================"
-	@echo "                      BẢNG HƯỚNG DẪN CÁC LỆNH MAKE                       "
+	@echo "                      BẢNG HƯỚNG DẪN CÁC LỆNH MAKE                      "
 	@echo "========================================================================"
-	@echo "--- MÔI TRƯỜNG PHÁT TRIỂN (DEVELOPMENT) ---"
-	@echo "  make install         - Cài đặt dependencies (pnpm install)"
-	@echo "  make dev             - Chạy Next.js dev server với Turbopack (http://localhost:3000)"
-	@echo "  make start           - Chạy máy chủ sản xuất"
+	@echo "--- BẮT ĐẦU ---"
+	@echo "  make setup           - Cài deps + tạo .env + dựng DB + seed (chạy 1 lần)"
 	@echo ""
-	@echo "--- BUILD & KIỂM TRA CHẤT LƯỢNG (BUILD & TESTING) ---"
-	@echo "  make build           - Build ứng dụng Next.js sản xuất"
-	@echo "  make lint            - Kiểm tra cú pháp mã nguồn (ESLint)"
-	@echo "  make typecheck       - Kiểm tra kiểu dữ liệu (TypeScript)"
-	@echo "  make test            - Chạy unit tests (Vitest)"
-	@echo "  make format          - Định dạng mã nguồn tự động (Prettier)"
-	@echo "  make format-check    - Kiểm tra chuẩn định dạng code (Prettier)"
+	@echo "--- PHÁT TRIỂN ---"
+	@echo "  make install         - Cài đặt dependencies"
+	@echo "  make dev             - Chạy dev server (http://localhost:3000)"
+	@echo "  make start           - Chạy bản build production"
+	@echo "  make build           - Build production"
 	@echo ""
-	@echo "--- QUẢN LÝ DATABASE (PRISMA) ---"
+	@echo "--- CHẤT LƯỢNG ---"
+	@echo "  make check           - Chạy tất cả: typecheck + lint + format + test"
+	@echo "  make typecheck       - Kiểm tra kiểu TypeScript"
+	@echo "  make lint            - ESLint (make lint-fix để tự sửa)"
+	@echo "  make test            - Unit test (test-watch / test-coverage)"
+	@echo "  make format          - Prettier (format-check để chỉ kiểm tra)"
+	@echo ""
+	@echo "--- DATABASE ---"
+	@echo "  make db-migrate      - Tạo migration mới (dev)"
+	@echo "  make db-deploy       - Áp migration đã có (production)"
 	@echo "  make db-generate     - Sinh Prisma Client"
-	@echo "  make db-migrate      - Chạy Database Migration"
-	@echo "  make db-studio       - Mở Prisma Studio trên giao diện web"
-	@echo "  make db-seed         - Nạp dữ liệu mẫu vào Database"
+	@echo "  make db-studio       - Mở Prisma Studio"
+	@echo "  make db-seed-dev     - Nạp dữ liệu mẫu"
+	@echo "  make db-seed-prod    - Chỉ tạo tài khoản admin nền"
+	@echo "  make db-reset        - XOÁ SẠCH database rồi tạo lại"
 	@echo ""
-	@echo "--- QUẢN LÝ DOCKER ---"
-	@echo "  make docker-build    - Build Docker image sản xuất"
-	@echo "  make docker-up       - Khởi chạy Postgres & Web container"
-	@echo "  make docker-down     - Dừng và xoá các container"
-	@echo "  make docker-logs     - Xem log thời gian thực của Docker containers"
-	@echo "  make docker-ps       - Xem trạng thái các container đang chạy"
+	@echo "--- DOCKER ---"
+	@echo "  make docker-build    - Build image"
+	@echo "  make docker-up       - Chạy postgres + migrate + web"
+	@echo "  make docker-down     - Dừng và xoá container"
+	@echo "  make docker-logs     - Xem log realtime"
+	@echo "  make docker-ps       - Trạng thái container"
 	@echo "========================================================================"
 
-# Development Commands
+# Một lệnh duy nhất để có môi trường chạy được từ repo vừa clone.
+setup:
+	pnpm install
+	@test -f .env || (cp .env.example .env && echo "→ Đã tạo .env — hãy set SESSION_SECRET: openssl rand -base64 48")
+	docker compose up -d postgres
+	@echo "→ Đợi Postgres sẵn sàng..."
+	@until docker compose exec -T postgres pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	pnpm db:migrate
+	pnpm db:seed:dev
+	@echo "→ Xong. Chạy 'make dev'."
+
 install:
 	pnpm install
 
@@ -44,12 +60,17 @@ dev:
 start:
 	pnpm start
 
-# Build & Quality Commands
 build:
 	pnpm build
 
+check:
+	pnpm check
+
 lint:
 	pnpm lint
+
+lint-fix:
+	pnpm lint:fix
 
 typecheck:
 	pnpm typecheck
@@ -57,18 +78,26 @@ typecheck:
 test:
 	pnpm test
 
+test-watch:
+	pnpm test:watch
+
+test-coverage:
+	pnpm test:coverage
+
 format:
 	pnpm format
 
 format-check:
 	pnpm format:check
 
-# Database Commands
 db-generate:
 	pnpm db:generate
 
 db-migrate:
 	pnpm db:migrate
+
+db-deploy:
+	pnpm db:deploy
 
 db-studio:
 	pnpm db:studio
@@ -76,13 +105,15 @@ db-studio:
 db-seed:
 	pnpm db:seed
 
-db-seed-prod:
-	pnpm db:seed:prod
-
 db-seed-dev:
 	pnpm db:seed:dev
 
-# Docker Commands
+db-seed-prod:
+	pnpm db:seed:prod
+
+db-reset:
+	pnpm db:reset
+
 docker-build:
 	docker compose build
 
