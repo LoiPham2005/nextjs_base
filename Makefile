@@ -2,7 +2,7 @@
         test-coverage format format-check \
         db-generate db-migrate db-deploy db-studio db-seed db-seed-dev db-seed-prod db-reset \
         docker-build docker-up docker-down docker-logs docker-ps \
-        docker-size docker-clean \
+        docker-deploy docker-size docker-clean \
         vps-deploy vps-logs vps-status vps-files
 
 help:
@@ -40,6 +40,7 @@ help:
 	@echo "  make docker-down     - Dừng và xoá container"
 	@echo "  make docker-logs     - Xem log realtime"
 	@echo "  make docker-ps       - Trạng thái container"
+	@echo "  make docker-deploy   - Deploy trên VPS: build, up, health check, dọn rác"
 	@echo "  make docker-size     - Xem dung lượng image và rác build còn sót"
 	@echo "  make docker-clean    - Xoá image mồ côi do build lỗi (an toàn)"
 	@echo ""
@@ -138,6 +139,9 @@ docker-logs:
 
 docker-ps:
 	docker compose ps
+
+docker-deploy:
+	./scripts/deploy-docker.sh
 
 docker-size:
 	@echo "── Image của dự án:"

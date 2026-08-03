@@ -157,9 +157,17 @@ Hỗ trợ hai cách, chọn một:
 ### Cách 1 — Docker
 
 ```bash
+# Lần đầu
 docker compose up -d          # postgres → migrate (1 lần) → web
-docker compose logs -f web
+
+# Mỗi lần deploy sau đó
+./scripts/deploy-docker.sh    # pull → build → up → health check → dọn image cũ
 ```
+
+Bước dọn image ở cuối **không phải tuỳ chọn**. Mỗi lần build, image cũ mất tag
+và thành `<none>` nhưng vẫn chiếm đĩa; VPS 20–40GB deploy vài chục lần là đầy,
+và Docker hỏng khi hết chỗ chứ không báo trước. Script chỉ dọn **sau khi** đã
+xác nhận service khoẻ — deploy hỏng thì image cũ chính là đường lùi.
 
 `web` chỉ khởi động sau khi service `migrate` kết thúc thành công, nên schema
 luôn được áp trước request đầu tiên. Image runtime chạy bằng user không phải
