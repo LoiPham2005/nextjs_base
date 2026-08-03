@@ -79,10 +79,18 @@ export default tseslint.config(
     },
   },
 
-  // File config .mjs không nằm trong chương trình TypeScript.
+  // File config và script .mjs — chạy bằng Node, không nằm trong chương trình
+  // TypeScript nên không lint theo kiểu được.
   {
     files: ["**/*.mjs", "**/*.js"],
     extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        URL: "readonly",
+      },
+    },
     rules: { "no-console": "off" },
   },
 

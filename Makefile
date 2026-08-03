@@ -1,7 +1,8 @@
 .PHONY: help setup install dev build start check lint lint-fix typecheck test test-watch \
         test-coverage format format-check \
         db-generate db-migrate db-deploy db-studio db-seed db-seed-dev db-seed-prod db-reset \
-        docker-build docker-up docker-down docker-logs docker-ps
+        docker-build docker-up docker-down docker-logs docker-ps \
+        vps-deploy vps-logs vps-status vps-files
 
 help:
 	@echo "========================================================================"
@@ -32,12 +33,18 @@ help:
 	@echo "  make db-seed-prod    - Chỉ tạo tài khoản admin nền"
 	@echo "  make db-reset        - XOÁ SẠCH database rồi tạo lại"
 	@echo ""
-	@echo "--- DOCKER ---"
+	@echo "--- DEPLOY: DOCKER ---"
 	@echo "  make docker-build    - Build image"
 	@echo "  make docker-up       - Chạy postgres + migrate + web"
 	@echo "  make docker-down     - Dừng và xoá container"
 	@echo "  make docker-logs     - Xem log realtime"
 	@echo "  make docker-ps       - Trạng thái container"
+	@echo ""
+	@echo "--- DEPLOY: VPS TRỰC TIẾP (systemd + Caddy) ---"
+	@echo "  make vps-deploy      - Deploy trên máy chủ (pull, migrate, build, restart)"
+	@echo "  make vps-logs        - Xem log service qua journalctl"
+	@echo "  make vps-status      - Trạng thái systemd service"
+	@echo "  make vps-files       - In hướng dẫn cài systemd + Caddy lần đầu"
 	@echo "========================================================================"
 
 # Một lệnh duy nhất để có môi trường chạy được từ repo vừa clone.
@@ -128,3 +135,33 @@ docker-logs:
 
 docker-ps:
 	docker compose ps
+
+# --- VPS trực tiếp ---------------------------------------------------------
+# Các target dưới đây chạy TRÊN MÁY CHỦ, không phải máy dev.
+
+SERVICE ?= nextjs-base
+
+vps-deploy:
+	./scripts/deploy-vps.sh
+
+vps-logs:
+	journalctl -u $(SERVICE) -f
+
+vps-status:
+	systemctl status $(SERVICE) --no-pager
+
+vps-files:
+	@echo "Cài đặt lần đầu trên VPS:"
+	@echo ""
+	@echo "  sudo mkdir -p /etc/nextjs-base"
+	@echo "  sudo cp .env.example /etc/nextjs-base/env   # rồi điền giá trị thật"
+	@echo "  sudo chmod 600 /etc/nextjs-base/env"
+	@echo ""
+	@echo "  sudo cp deploy/nextjs-base.service /etc/systemd/system/"
+	@echo "  sudo systemctl daemon-reload"
+	@echo "  sudo systemctl enable --now $(SERVICE)"
+	@echo ""
+	@echo "  sudo cp deploy/Caddyfile /etc/caddy/Caddyfile   # đổi example.com"
+	@echo "  sudo systemctl reload caddy"
+	@echo ""
+	@echo "Đã có nginx trên máy? Dùng deploy/nginx.conf thay cho Caddyfile."

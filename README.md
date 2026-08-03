@@ -142,19 +142,76 @@ pnpm db:reset         # XOÁ SẠCH rồi tạo lại
 
 ---
 
-## Docker
+## Deploy
+
+Hỗ trợ hai cách, chọn một:
+
+|              | **Docker**                            | **VPS trực tiếp**                      |
+| ------------ | ------------------------------------- | -------------------------------------- |
+| Hợp khi      | máy chưa có gì, muốn dựng nhanh       | VPS đã có Postgres/nginx sẵn, muốn nhẹ |
+| Postgres     | container kèm theo                    | tự cài trên máy                        |
+| RAM tiêu tốn | nhiều hơn                             | ít hơn                                 |
+| Migration    | service `migrate` tự chạy trước `web` | `scripts/deploy-vps.sh` chạy           |
+
+### Cách 1 — Docker
 
 ```bash
 docker compose up -d          # postgres → migrate (1 lần) → web
 docker compose logs -f web
 ```
 
-`web` chỉ khởi động sau khi service `migrate` chạy xong, nên schema luôn được
-áp trước request đầu tiên. Image runtime chạy bằng user không phải root và có
-`HEALTHCHECK` gọi `/api/health`.
+`web` chỉ khởi động sau khi service `migrate` kết thúc thành công, nên schema
+luôn được áp trước request đầu tiên. Image runtime chạy bằng user không phải
+root và có `HEALTHCHECK` gọi `/api/health`.
 
 Cần `.env` có `SESSION_SECRET` — không có thì container dừng ngay kèm thông báo
 rõ ràng, đó là chủ ý.
+
+### Cách 2 — VPS trực tiếp (systemd + Caddy)
+
+```bash
+# --- một lần trên máy chủ ---
+sudo mkdir -p /etc/nextjs-base
+sudo cp .env.example /etc/nextjs-base/env   # rồi điền giá trị thật
+sudo chmod 600 /etc/nextjs-base/env         # file này chứa SESSION_SECRET
+
+sudo cp deploy/nextjs-base.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now nextjs-base
+
+sudo cp deploy/Caddyfile /etc/caddy/Caddyfile   # đổi example.com
+sudo systemctl reload caddy
+
+# --- mỗi lần deploy ---
+./scripts/deploy-vps.sh     # pull → install → migrate → build → restart → health check
+```
+
+**Caddy hay nginx?** Mặc định dùng **Caddy** — nó tự xin và tự gia hạn chứng
+chỉ Let's Encrypt ngay trong tiến trình, không cần certbot cũng không cần cron.
+Cert hết hạn lúc 3 giờ sáng là nguyên nhân downtime phổ biến nhất của deploy
+thủ công, và Caddy xoá hẳn nguyên nhân đó. Cấu hình cũng ngắn hơn nhiều.
+
+Dùng [deploy/nginx.conf](deploy/nginx.conf) thay thế **khi VPS đã chạy nginx
+cho dự án khác** — lúc đó thêm Caddy sẽ tranh cổng 80/443, và giải pháp đúng là
+thêm một server block nginx.
+
+Dù chọn cái nào, **reverse proxy phải ghi đè `X-Forwarded-For` bằng IP thật**
+(`{remote_host}` ở Caddy, `$remote_addr` ở nginx). Nếu chỉ nối thêm vào header
+sẵn có, client tự gửi header giả là né sạch rate limit đăng nhập. Cả hai file
+mẫu đều đã xử lý đúng.
+
+#### Vài điểm dễ vấp
+
+- **`pnpm build` tự chép `public/` và `.next/static/` vào `.next/standalone/`**
+  ([scripts/prepare-standalone.mjs](scripts/prepare-standalone.mjs)). Next.js
+  cố tình không làm bước này. Quên nó thì server vẫn trả HTML 200 nhưng toàn bộ
+  CSS/JS trả 404 — trang hiện ra trần trụi mà không có lỗi nào báo.
+- **File env nằm ở `/etc/nextjs-base/env`, không phải `.env` trong mã nguồn.**
+  `server.js` của bản standalone tự `process.chdir()` vào thư mục của nó nên
+  `.env` ở gốc dự án không bao giờ được nạp trên production. systemd truyền
+  biến vào qua `EnvironmentFile`.
+- **App chỉ lắng nghe `127.0.0.1`.** Reverse proxy là cửa duy nhất ra Internet;
+  bind `0.0.0.0` là để lộ cổng 3000, đi vòng qua cả TLS lẫn rate limit.
+- Yêu cầu **Node ≥ 22.9**. Node 20 đã hết vòng đời hỗ trợ từ tháng 4/2026.
 
 ---
 

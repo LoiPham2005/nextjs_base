@@ -1,0 +1,58 @@
+# Reverse proxy Caddy cho bản deploy VPS — lựa chọn mặc định.
+#
+#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+#   sudo nano /etc/caddy/Caddyfile      # đổi example.com thành domain thật
+#   sudo systemctl reload caddy
+#
+# HTTPS tự động: Caddy tự xin chứng chỉ Let's Encrypt và tự gia hạn, không cần
+# certbot cũng không cần cron. Điều kiện: domain đã trỏ A/AAAA về IP máy này,
+# và cổng 80 + 443 mở ra Internet (cổng 80 dùng cho ACME challenge).
+#
+# Nếu đứng sau Cloudflare proxy (mây cam), bật SSL mode "Full (strict)", hoặc
+# chuyển sang DNS challenge — HTTP challenge sẽ không tới được máy chủ.
+
+example.com {
+	encode zstd gzip
+
+	# Giới hạn kích thước request. Nếu app có upload file, nâng con số này.
+	request_body {
+		max_size 10MB
+	}
+
+	reverse_proxy 127.0.0.1:3000 {
+		# QUAN TRỌNG — đây là chỗ dễ sai nhất của cả file.
+		#
+		# Mặc định Caddy NỐI THÊM IP client vào X-Forwarded-For đã có sẵn.
+		# Nghĩa là client tự gửi kèm "X-Forwarded-For: 1.2.3.4" thì app đọc
+		# được giá trị giả đó và né sạch rate limit đăng nhập.
+		#
+		# `{remote_host}` là IP thật mà Caddy nhìn thấy ở tầng TCP, và
+		# `header_up` với một giá trị sẽ GHI ĐÈ chứ không nối thêm.
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Real-IP {remote_host}
+
+		# Không nhận response lỗi từ app rồi tự thay bằng trang lỗi của Caddy:
+		# API phải trả đúng JSON và status code mà route handler đã dựng.
+		health_uri /api/health
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	# Header bảo mật (HSTS, CSP, X-Frame-Options...) do chính ứng dụng đặt
+	# trong next.config.mjs và src/proxy.ts. Cố tình không khai báo lại ở đây
+	# để tránh hai nguồn sự thật đá nhau.
+
+	log {
+		output file /var/log/caddy/nextjs-base.log
+		format json
+	}
+}
+
+# Trong lúc chưa có domain, dùng khối này để test trên IP (HTTP, không TLS):
+#
+# :80 {
+# 	reverse_proxy 127.0.0.1:3000 {
+# 		header_up X-Forwarded-For {remote_host}
+# 		header_up X-Real-IP {remote_host}
+# 	}
+# }

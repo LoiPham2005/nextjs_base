@@ -4,12 +4,13 @@
   "private": true,
   "packageManager": "pnpm@10.20.0",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.9.0"
   },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "postbuild": "node scripts/prepare-standalone.mjs",
+    "start": "node --env-file-if-exists=.env .next/standalone/server.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
