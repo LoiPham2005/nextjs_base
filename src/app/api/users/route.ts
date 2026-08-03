@@ -1,0 +1,58 @@
+import { z } from "zod";
+import { requireApiAdmin } from "@/lib/api/auth";
+import { apiErrors, apiOk, handleApiError, parseJsonBody } from "@/lib/api/response";
+import { createUserSchema } from "@/schemas/user.schema";
+import { userService } from "@/services/user.service";
+
+export const dynamic = "force-dynamic";
+
+const listQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  perPage: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export async function GET(request: Request) {
+  try {
+    await requireApiAdmin(request);
+
+    const url = new URL(request.url);
+    const parsed = listQuerySchema.safeParse({
+      page: url.searchParams.get("page") ?? undefined,
+      perPage: url.searchParams.get("perPage") ?? undefined,
+    });
+
+    if (!parsed.success) {
+      throw apiErrors.validation(z.flattenError(parsed.error).fieldErrors);
+    }
+
+    const { page, perPage } = parsed.data;
+
+    const [users, total] = await Promise.all([
+      userService.list({ skip: (page - 1) * perPage, take: perPage }),
+      userService.count(),
+    ]);
+
+    return apiOk({
+      users,
+      pagination: { page, perPage, total, totalPages: Math.ceil(total / perPage) },
+    });
+  } catch (error) {
+    return handleApiError(error, { route: "GET /api/users" });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    await requireApiAdmin(request);
+
+    // createUserSchema có nhận `role`, và ở đây thì hợp lệ: người gọi đã được
+    // xác thực là ADMIN. Khác với form trên web, nơi role bị bỏ qua hoàn toàn
+    // vì bất kỳ ai cũng gửi được field ẩn.
+    const body = await parseJsonBody(request, createUserSchema);
+    const user = await userService.create(body);
+
+    return apiOk({ user }, 201);
+  } catch (error) {
+    return handleApiError(error, { route: "POST /api/users" });
+  }
+}

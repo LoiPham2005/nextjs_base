@@ -1,0 +1,30 @@
+import { enforceRateLimit } from "@/lib/api/auth";
+import { apiOk, handleApiError, parseJsonBody } from "@/lib/api/response";
+import { issueTokenPair } from "@/lib/api/tokens";
+import { logger } from "@/lib/logger";
+import { resetRateLimit } from "@/lib/rate-limit";
+import { loginSchema } from "@/schemas/auth.schema";
+import { authService } from "@/services/auth.service";
+
+export const dynamic = "force-dynamic";
+
+export async function POST(request: Request) {
+  try {
+    const rateLimitKey = enforceRateLimit(request, "api:login", {
+      limit: 5,
+      windowSeconds: 300,
+    });
+
+    const body = await parseJsonBody(request, loginSchema);
+    const user = await authService.validateCredentials(body);
+
+    resetRateLimit(rateLimitKey);
+    logger.info("API login", { userId: user.id });
+
+    const tokens = await issueTokenPair(user, request.headers.get("user-agent"));
+
+    return apiOk({ user, ...tokens });
+  } catch (error) {
+    return handleApiError(error, { route: "POST /api/auth/login" });
+  }
+}
