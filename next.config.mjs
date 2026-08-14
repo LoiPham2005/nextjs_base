@@ -30,6 +30,21 @@ const nextConfig = {
   // <Link href="..."> được typecheck theo route thật sự tồn tại.
   typedRoutes: true,
 
+  /*
+   * Vá lỗi truy vết file của Next 16.3.1 khi dùng pnpm.
+   *
+   * Bản standalone chỉ chép thư mục `cjs/` của @swc/helpers, trong khi runtime
+   * lại nạp `esm/_interop_require_default.js`. Hậu quả rất khó chịu: `pnpm
+   * build` xanh, image Docker build xong, nhưng container vừa khởi động là
+   * chết ngay với MODULE_NOT_FOUND — lỗi chỉ lộ ra khi CHẠY THẬT.
+   *
+   * Bỏ dòng này ra được khi Next vá lỗi tracing. Cách kiểm tra: xoá đi, chạy
+   * `pnpm build && node .next/standalone/server.js`, thấy server lên là đã vá.
+   */
+  outputFileTracingIncludes: {
+    "**/*": ["./node_modules/.pnpm/@swc+helpers@*/node_modules/@swc/helpers/**"],
+  },
+
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

@@ -15,8 +15,7 @@ coverage
 
 # env — chỉ .env.example được commit
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
 
 # logs

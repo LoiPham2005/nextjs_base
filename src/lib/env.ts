@@ -10,6 +10,25 @@ import { z } from "zod";
  * Trong Docker build không có secret thật, nên đặt SKIP_ENV_VALIDATION=1 cho
  * bước `next build` (xem Dockerfile).
  */
+/**
+ * Coi chuỗi RỖNG như "không khai báo".
+ *
+ * `.optional()` và `.default()` của Zod chỉ nhảy vào khi giá trị là
+ * `undefined`. Nhưng có ba đường rất phổ biến đưa chuỗi rỗng vào thay vì
+ * `undefined`:
+ *
+ *   - dòng `ADMIN_EMAIL=` bỏ trống trong file `.env`
+ *   - `ARG`/`ENV` của Dockerfile không được truyền giá trị
+ *   - `${BIEN:-}` trong docker-compose khi biến chưa set
+ *
+ * Không có lớp này thì app chết ngay lúc khởi động kèm thông báo gây hiểu lầm
+ * ("ADMIN_EMAIL không hợp lệ") cho một biến vốn là tuỳ chọn — và nó chỉ xảy ra
+ * trên Docker/CI chứ không xảy ra trên máy dev, nên rất tốn thời gian truy.
+ */
+function emptyAsUndefined<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess((value) => (value === "" ? undefined : value), schema);
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
@@ -22,7 +41,7 @@ const envSchema = z.object({
     ),
 
   /** Kết nối trực tiếp, bỏ qua pooler. Chỉ cần khi dùng PgBouncer/Neon/Supabase. */
-  DIRECT_DATABASE_URL: z.string().min(1).optional(),
+  DIRECT_DATABASE_URL: emptyAsUndefined(z.string().min(1).optional()),
 
   SESSION_SECRET: z
     .string()
@@ -41,10 +60,12 @@ const envSchema = z.object({
   /** Hạn refresh token. Thu hồi được vì nó nằm trong database. */
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().max(365).default(30),
 
-  ADMIN_EMAIL: z.email("ADMIN_EMAIL không hợp lệ").optional(),
-  ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD tối thiểu 8 ký tự").optional(),
+  ADMIN_EMAIL: emptyAsUndefined(z.email("ADMIN_EMAIL không hợp lệ").optional()),
+  ADMIN_PASSWORD: emptyAsUndefined(
+    z.string().min(8, "ADMIN_PASSWORD tối thiểu 8 ký tự").optional(),
+  ),
 
-  NEXT_PUBLIC_APP_URL: z.url().optional(),
+  NEXT_PUBLIC_APP_URL: emptyAsUndefined(z.url().optional()),
 });
 
 export type Env = z.infer<typeof envSchema>;
