@@ -31,10 +31,24 @@ export const ACCESS_TOKEN_MAX_AGE_SECONDS = env.ACCESS_TOKEN_TTL_MINUTES * 60;
 const sessionPayloadSchema = z.object({
   sub: z.string().min(1),
   email: z.email(),
-  role: z.enum(["USER", "ADMIN"]),
+
+  /**
+   * KHOÁ vai trò, ví dụ `"ADMIN"`.
+   *
+   * Là chuỗi tự do chứ không phải enum: vai trò nằm trong database và quản trị
+   * viên tạo thêm được lúc chạy, nên không thể liệt kê trước.
+   *
+   * Token CHỈ mang khoá vai trò, KHÔNG mang danh sách quyền. Hai lý do: token
+   * sẽ phình theo số quyền, và quan trọng hơn — quyền đã ký vào token thì sửa
+   * phân quyền không có tác dụng cho tới khi token hết hạn. Quyền luôn được
+   * tra lại qua `permissionService`.
+   */
+  role: z.string().min(1),
 });
 
 export type SessionPayload = z.infer<typeof sessionPayloadSchema>;
+
+/** Khoá vai trò. Xem ghi chú trong `sessionPayloadSchema`. */
 export type UserRole = SessionPayload["role"];
 
 /**

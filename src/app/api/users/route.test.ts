@@ -14,8 +14,19 @@ vi.mock("@/services/user.service", async (importOriginal) => {
   return { ...actual, userService: { list: vi.fn(), count: vi.fn(), create: vi.fn() } };
 });
 
+/**
+ * Từ khi vai trò xuống database, `requireApiPermission` phải tra bảng phân
+ * quyền. Mock lại để test route không cần một Postgres đang chạy — thứ đang
+ * được kiểm ở đây là cách route phản ứng với quyền, không phải cách quyền được
+ * đọc lên (đã có `permission.service.test.ts` lo).
+ */
+vi.mock("@/services/permission.service", () => ({
+  permissionService: { can: vi.fn(), canActOnResource: vi.fn() },
+}));
+
 import { signSession } from "@/lib/session";
 import { userService } from "@/services/user.service";
+import { permissionService } from "@/services/permission.service";
 import { GET, POST } from "./route";
 
 const admin = { sub: "admin-1", email: "admin@example.com", role: "ADMIN" as const };
@@ -39,6 +50,10 @@ beforeEach(() => {
   cookieStore.get.mockReturnValue(undefined);
   vi.mocked(userService.list).mockResolvedValue([]);
   vi.mocked(userService.count).mockResolvedValue(0);
+  // Mặc định: ADMIN có quyền, USER thì không.
+  vi.mocked(permissionService.can).mockImplementation((roleKey) =>
+    Promise.resolve(roleKey === "ADMIN"),
+  );
 });
 
 describe("GET /api/users", () => {
@@ -115,7 +130,10 @@ describe("POST /api/users", () => {
     vi.mocked(userService.create).mockResolvedValue({
       id: "u-2",
       email: "new@example.com",
-      name: null,
+      username: "u",
+      fullName: null,
+      roleName: "Người dùng",
+      emailVerifiedAt: null,
       role: "ADMIN",
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -123,10 +141,10 @@ describe("POST /api/users", () => {
 
     const response = await post(await signSession(admin), {
       email: "new@example.com",
-      role: "ADMIN",
+      roleKey: "ADMIN",
     });
 
     expect(response.status).toBe(201);
-    expect(vi.mocked(userService.create).mock.calls[0]?.[0].role).toBe("ADMIN");
+    expect(vi.mocked(userService.create).mock.calls[0]?.[0].roleKey).toBe("ADMIN");
   });
 });

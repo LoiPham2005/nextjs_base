@@ -115,6 +115,139 @@ khoá bằng test trong `src/app/users/actions.test.ts`.
 
 ---
 
+## Mật khẩu, quyền hạn và xác thực email
+
+### Băm mật khẩu — Argon2id, tự nâng cấp dần
+
+Dùng `@node-rs/argon2` với tham số OWASP (19 MiB, 2 lượt, 1 luồng). Argon2id
+tốn cả CPU lẫn **bộ nhớ**, nên dàn GPU dò offline bị chặn bởi băng thông bộ nhớ
+— thứ đắt và khó mở rộng hơn số nhân.
+
+Kho mật khẩu cũ băm bằng bcrypt **vẫn đăng nhập được**. Không thể chuyển đổi
+một hash sang thuật toán khác nếu không biết mật khẩu gốc, nên việc nâng cấp
+diễn ra ngay lúc đăng nhập thành công — khi mật khẩu còn trong bộ nhớ:
+
+1. `verifyPassword` nhận diện thuật toán từ chính chuỗi hash.
+2. Đúng mật khẩu + hash cũ → trả về `needsRehash: true`.
+3. `AuthService` băm lại bằng Argon2id và ghi đè.
+
+Người dùng không thấy gì khác. Lỗi ở bước ghi đè bị nuốt có chủ đích — họ đã
+nhập đúng mật khẩu, một thao tác nền thất bại không được phép chặn đăng nhập.
+
+Đổi tham số Argon2 trong `src/lib/crypto.ts` cũng kích hoạt đúng cơ chế này:
+mọi hash sinh bằng tham số cũ sẽ được băm lại ở lần đăng nhập kế tiếp.
+
+### Phân quyền — RBAC lai giữa code và database
+
+Ba bảng: `roles`, `permissions`, `role_permissions`. Nhưng **không phải RBAC
+thuần database** — phân công như sau:
+
+|                            | Nơi giữ                         | Vì sao                                                                                                                                                           |
+| -------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Danh mục quyền TỒN TẠI     | Code (`src/lib/permissions.ts`) | Một quyền chỉ có nghĩa khi có mã kiểm tra nó. Cho tạo quyền từ giao diện sẽ sinh ra những dòng không ràng buộc điều gì. TypeScript vẫn bắt lỗi gõ sai tên quyền. |
+| Việc GÁN quyền cho vai trò | Database                        | "Kế toán được xem báo cáo nhưng không xoá đơn" là quyết định nghiệp vụ, khác nhau theo khách hàng, và không nên cần deploy.                                      |
+
+```ts
+// Trang / layout
+await requirePermission("user:read");
+
+// Route handler
+await requireApiPermission(request, "user:delete");
+
+// Có xét quyền `:own`
+await permissionService.canActOnResource(session.role, ownerId, session.sub, {
+  any: "user:read",
+  own: "profile:read:own",
+});
+```
+
+**Thêm quyền mới**: khai báo trong `PERMISSIONS`, thêm mô tả vào
+`PERMISSION_DESCRIPTIONS`, gán mặc định trong `DEFAULT_ROLE_PERMISSIONS`, rồi
+`pnpm db:seed`. Không cần viết migration.
+
+**Thêm vai trò mới**: chèn thẳng vào bảng `roles` lúc chạy. Không cần deploy.
+
+#### Cache — và hai giới hạn phải biết
+
+`permissionService` giữ bản đồ vai trò → quyền trong RAM, TTL 60 giây. Không có
+nó thì mỗi request là một lần join ba bảng chỉ để đọc dữ liệu đổi vài lần một
+năm.
+
+1. **Cache theo tiến trình.** Chạy nhiều replica thì `invalidate()` chỉ xoá bản
+   sao của replica đang xử lý request đó; các replica khác tự làm mới sau TTL.
+   Cần đồng bộ tức thì thì chuyển cache sang Redis — chỗ gọi giữ nguyên.
+2. **Mọi thao tác ghi phân quyền BẮT BUỘC gọi `permissionService.invalidate()`.**
+   Quên thì quản trị viên bỏ tick một quyền, thử lại ngay, thấy vẫn làm được,
+   và kết luận hệ thống hỏng.
+
+⚠️ Quyền được tra theo `role` **lấy từ token**, không phải từ database. Người
+vừa bị đổi vai trò vẫn giữ vai trò cũ tới khi token hết hạn. Với thao tác nhạy
+cảm (xoá dữ liệu, chuyển tiền, đổi quyền người khác), đọc lại `role` từ database
+ngay trong route đó.
+
+**Seed chỉ THÊM, không ghi đè.** Nếu seed áp lại `DEFAULT_ROLE_PERMISSIONS` thì
+mỗi lần deploy sẽ xoá sạch cấu hình khách hàng đã chỉnh — và không ai hiểu vì
+sao phân quyền "tự quay về như cũ".
+
+### Danh tính người dùng — email, username, fullName
+
+- `email` — bắt buộc, **luôn hạ về chữ thường** trước khi ghi và trước khi tra.
+  Không chuẩn hoá thì `Loi@x.com` và `loi@x.com` thành hai tài khoản.
+- `username` — tuỳ chọn, unique, chỉ `[a-z0-9_]{3,32}`. Cấm chữ hoa ngay từ
+  đầu vào thay vì tự hạ xuống, để người dùng biết chính xác tên họ sẽ là gì.
+- `fullName` — tên hiển thị. Tách bạch với `username`: một cái để người khác
+  đọc, một cái để đăng nhập.
+
+Đăng nhập nhận **cả hai** qua một trường `identifier`. Có ký tự `@` thì tra theo
+email, không thì tra theo username — `usernameSchema` cấm `@` nên không nhập
+nhằng.
+
+⚠️ **Phá vỡ tương thích**: trường đăng nhập đổi từ `email` sang `identifier`.
+Client mobile đang chạy phải cập nhật theo.
+
+### Xác thực email và đặt lại mật khẩu
+
+Token dùng một lần, lưu trong bảng `verification_tokens`:
+
+- **Chỉ lưu SHA-256**, không lưu token gốc — rò database không mất tài khoản.
+- **Dùng một lần thật sự**: đánh dấu bằng `updateMany` có điều kiện `usedAt:
+null` rồi kiểm tra số dòng. Đọc-trước-ghi-sau sẽ để hai request song song
+  dùng được cùng một token.
+- **Cấp mới thì huỷ token cũ cùng loại**, trong cùng transaction.
+- **Hạn khác nhau theo loại**: xác thực email 24 giờ, đặt lại mật khẩu 60 phút.
+  Link đặt lại mật khẩu bị lộ là mất tài khoản, nên phải ngắn hơn.
+- **Đổi mật khẩu thu hồi toàn bộ refresh token.** Luồng này thường xuất phát từ
+  nghi ngờ bị chiếm tài khoản; để phiên cũ sống thì việc đổi gần như vô nghĩa.
+
+`/api/auth/forgot-password` **luôn trả 200**, kể cả khi email không tồn tại và
+kể cả khi gửi thư thất bại. Bất kỳ khác biệt nào — mã lỗi, thời gian phản hồi —
+đều biến nó thành công cụ dò danh sách người dùng. Lỗi thật vẫn vào log.
+
+### Gửi email
+
+`src/lib/mailer.ts` chỉ định nghĩa interface. Bộ khung **cố tình không chọn nhà
+cung cấp**: mỗi dự án bị ràng buộc khác nhau (SMTP nội bộ của khách, Resend,
+SES…), cắm cứng một cái chỉ tạo ra việc phải gỡ ra.
+
+- **Dev**: nội dung email ghi ra log — lấy link trong đó mà test.
+- **Production**: bản mặc định **ném lỗi**, buộc phải cấu hình thật. Im lặng
+  nuốt email nguy hiểm hơn nhiều: người dùng bấm "quên mật khẩu", hệ thống báo
+  thành công, thư không bao giờ tới.
+
+```ts
+setMailer({
+  async send({ to, subject, text }) {
+    /* gọi nhà cung cấp */
+  },
+});
+```
+
+`NEXT_PUBLIC_APP_URL` là **bắt buộc** khi bật luồng email — link trong thư dựng
+từ nó. Thiếu thì việc gửi ném lỗi ngay, thay vì gửi đi một email chứa link
+localhost mà không rút lại được.
+
+---
+
 ## Các lệnh
 
 ```bash
@@ -293,18 +426,23 @@ mọi handler phải gọi `requireApiUser()` hoặc `requireApiAdmin()`.
 
 ### Các endpoint có sẵn
 
-| Method   | Đường dẫn            | Quyền                 |
-| -------- | -------------------- | --------------------- |
-| `POST`   | `/api/auth/register` | công khai             |
-| `POST`   | `/api/auth/login`    | công khai             |
-| `POST`   | `/api/auth/refresh`  | refresh token         |
-| `POST`   | `/api/auth/logout`   | đã đăng nhập          |
-| `GET`    | `/api/auth/me`       | đã đăng nhập          |
-| `GET`    | `/api/users`         | ADMIN                 |
-| `POST`   | `/api/users`         | ADMIN                 |
-| `GET`    | `/api/users/{id}`    | ADMIN hoặc chính mình |
-| `DELETE` | `/api/users/{id}`    | ADMIN                 |
-| `GET`    | `/api/health`        | công khai             |
+| Method   | Đường dẫn                        | Quyền                 |
+| -------- | -------------------------------- | --------------------- |
+| `POST`   | `/api/auth/register`             | công khai             |
+| `POST`   | `/api/auth/login`                | công khai             |
+| `POST`   | `/api/auth/refresh`              | refresh token         |
+| `POST`   | `/api/auth/logout`               | đã đăng nhập          |
+| `GET`    | `/api/auth/me`                   | đã đăng nhập          |
+| `POST`   | `/api/auth/forgot-password`      | công khai             |
+| `POST`   | `/api/auth/reset-password`       | token trong email     |
+| `POST`   | `/api/auth/verify-email`         | token trong email     |
+| `POST`   | `/api/auth/verify-email/request` | đã đăng nhập          |
+| `POST`   | `/api/auth/change-password`      | đã đăng nhập          |
+| `GET`    | `/api/users`                     | ADMIN                 |
+| `POST`   | `/api/users`                     | ADMIN                 |
+| `GET`    | `/api/users/{id}`                | ADMIN hoặc chính mình |
+| `DELETE` | `/api/users/{id}`                | ADMIN                 |
+| `GET`    | `/api/health`                    | công khai             |
 
 ### Định dạng response
 

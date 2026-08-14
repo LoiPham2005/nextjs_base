@@ -1,6 +1,6 @@
 import "server-only";
-import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "@/lib/prisma";
+import { generateOpaqueToken, hashOpaqueToken } from "@/lib/opaque-token";
 import { env } from "@/lib/env";
 import type { UserRole } from "@/lib/session";
 
@@ -18,12 +18,6 @@ import type { UserRole } from "@/lib/session";
  *    cả hai ra là phản ứng đúng.
  */
 
-const REFRESH_TOKEN_BYTES = 32;
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
-
 export type IssuedRefreshToken = {
   /** Chuỗi gốc — chỉ tồn tại trong response này, không lưu ở đâu cả. */
   token: string;
@@ -38,12 +32,12 @@ export type RefreshOwner = {
 
 export class TokenService {
   async issue(userId: string, userAgent?: string | null): Promise<IssuedRefreshToken> {
-    const token = randomBytes(REFRESH_TOKEN_BYTES).toString("base64url");
+    const token = generateOpaqueToken();
     const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
 
     await prisma.refreshToken.create({
       data: {
-        tokenHash: hashToken(token),
+        tokenHash: hashOpaqueToken(token),
         userId,
         expiresAt,
         userAgent: userAgent ?? null,
@@ -62,8 +56,8 @@ export class TokenService {
     userAgent?: string | null,
   ): Promise<{ owner: RefreshOwner; refresh: IssuedRefreshToken } | null> {
     const existing = await prisma.refreshToken.findUnique({
-      where: { tokenHash: hashToken(token) },
-      include: { user: { select: { id: true, email: true, role: true } } },
+      where: { tokenHash: hashOpaqueToken(token) },
+      include: { user: { select: { id: true, email: true, role: { select: { key: true } } } } },
     });
 
     if (!existing) return null;
@@ -87,7 +81,7 @@ export class TokenService {
       owner: {
         userId: existing.user.id,
         email: existing.user.email,
-        role: existing.user.role,
+        role: existing.user.role.key,
       },
       refresh,
     };
@@ -96,7 +90,7 @@ export class TokenService {
   /** Đăng xuất một thiết bị. Token không tồn tại cũng không sao — vẫn coi là thành công. */
   async revoke(token: string): Promise<void> {
     await prisma.refreshToken.updateMany({
-      where: { tokenHash: hashToken(token), revokedAt: null },
+      where: { tokenHash: hashOpaqueToken(token), revokedAt: null },
       data: { revokedAt: new Date() },
     });
   }

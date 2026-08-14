@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 import {
+  RoleNotFoundError,
   SelfDeletionError,
   UserAlreadyExistsError,
   UserNotFoundError,
@@ -11,11 +12,15 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: {
       create: vi.fn(),
+      update: vi.fn(),
       findMany: vi.fn(),
       findUnique: vi.fn(),
       delete: vi.fn(),
       count: vi.fn(),
     },
+    // Vai trò nằm trong database từ khi bỏ enum `Role`, nên mọi đường ghi user
+    // đều phải tra `roleId` trước.
+    role: { findUnique: vi.fn() },
   },
 }));
 
@@ -29,6 +34,24 @@ vi.mock("@/lib/crypto", () => ({
 }));
 
 import { prisma } from "@/lib/prisma";
+
+/**
+ * `create`/`delete` được gọi kèm `select` lồng cho quan hệ `role`, nên kiểu
+ * Prisma sinh ra không khớp fixture rút gọn. Gói lại một chỗ.
+ */
+function row(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "u-1",
+    email: "user@example.com",
+    username: "user",
+    fullName: "User",
+    emailVerifiedAt: null,
+    createdAt: new Date("2026-01-01"),
+    updatedAt: new Date("2026-01-01"),
+    role: { key: "USER", name: "Người dùng" },
+    ...overrides,
+  } as never;
+}
 import { CryptoUtils } from "@/lib/crypto";
 
 function prismaError(code: string) {
@@ -40,15 +63,7 @@ function prismaError(code: string) {
 
 // `prisma.user.create` được khai báo kiểu theo cả model, kể cả khi service
 // dùng `select` để loại bỏ password. Mock vì thế phải khớp model đầy đủ.
-const sampleUser = {
-  id: "u-1",
-  email: "test@example.com",
-  password: null,
-  name: "Test",
-  role: "USER" as const,
-  createdAt: new Date("2026-01-01"),
-  updatedAt: new Date("2026-01-01"),
-};
+const sampleUser = row();
 
 describe("UserService", () => {
   let service: UserService;
@@ -56,22 +71,50 @@ describe("UserService", () => {
   beforeEach(() => {
     service = new UserService();
     vi.clearAllMocks();
+    // Vai trò mặc định luôn tồn tại; ca kiểm thử nào cần vai trò lạ thì tự
+    // ghi đè mock này.
+    vi.mocked(prisma.role.findUnique).mockResolvedValue({ id: "role_user" } as never);
   });
 
   describe("create", () => {
     it("tạo user và hash mật khẩu", async () => {
-      vi.mocked(prisma.user.create).mockResolvedValue(sampleUser);
+      vi.mocked(prisma.user.create).mockResolvedValue(row({ email: "test@example.com" }));
 
       const user = await service.create({ email: "test@example.com", password: "secret123" });
 
       expect(CryptoUtils.hashPassword).toHaveBeenCalledWith("secret123");
       expect(user.email).toBe("test@example.com");
+      // `role` được làm phẳng thành khoá dạng chuỗi trước khi rời service.
+      expect(user.role).toBe("USER");
 
       // Kiểm tra cái thật sự quan trọng: query gửi xuống Prisma không hề chọn
       // cột password, nên nó không thể rò ra ngoài service.
       const callArgs = vi.mocked(prisma.user.create).mock.calls[0]?.[0];
       expect(callArgs?.select).not.toHaveProperty("password");
-      expect(callArgs?.select).toMatchObject({ id: true, email: true, role: true });
+      expect(callArgs?.select).toMatchObject({ id: true, email: true });
+    });
+
+    it("hạ email về chữ thường trước khi ghi", async () => {
+      vi.mocked(prisma.user.create).mockResolvedValue(row());
+
+      await service.create({ email: "Loi@Example.COM" });
+
+      // Không chuẩn hoá thì `Loi@...` và `loi@...` thành hai tài khoản khác
+      // nhau, và người dùng không đăng nhập lại được vì gõ hoa chữ đầu.
+      expect(vi.mocked(prisma.user.create).mock.calls[0]?.[0]).toMatchObject({
+        data: { email: "loi@example.com" },
+      });
+    });
+
+    it("báo lỗi rõ ràng khi vai trò không tồn tại", async () => {
+      vi.mocked(prisma.role.findUnique).mockResolvedValue(null);
+
+      await expect(
+        service.create({ email: "test@example.com", roleKey: "KHONG_CO" }),
+      ).rejects.toThrow(RoleNotFoundError);
+
+      // Phải chặn TRƯỚC khi ghi, không để database ném lỗi khoá ngoại thô.
+      expect(prisma.user.create).not.toHaveBeenCalled();
     });
 
     it("lưu password null khi không truyền mật khẩu", async () => {

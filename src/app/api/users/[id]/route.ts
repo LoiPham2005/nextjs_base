@@ -1,4 +1,5 @@
-import { requireApiAdmin, requireApiUser } from "@/lib/api/auth";
+import { requireApiPermission, requireApiUser } from "@/lib/api/auth";
+import { permissionService } from "@/services/permission.service";
 import { apiErrors, apiOk, handleApiError } from "@/lib/api/response";
 import { userService } from "@/services/user.service";
 
@@ -12,7 +13,15 @@ export async function GET(request: Request, { params }: RouteContext) {
     const session = await requireApiUser(request);
 
     // Người dùng thường chỉ xem được chính mình; ADMIN xem được tất cả.
-    if (session.role !== "ADMIN" && session.sub !== id) {
+    // Đọc được hồ sơ người khác cần quyền `user:read`; hồ sơ của chính mình
+    // thì chỉ cần `profile:read:own`. Luật gói trong canActOnResource để không
+    // bị chép lại — và chép sai — ở từng route.
+    const allowed = await permissionService.canActOnResource(session.role, id, session.sub, {
+      any: "user:read",
+      own: "profile:read:own",
+    });
+
+    if (!allowed) {
       throw apiErrors.forbidden();
     }
 
@@ -28,7 +37,7 @@ export async function GET(request: Request, { params }: RouteContext) {
 export async function DELETE(request: Request, { params }: RouteContext) {
   try {
     const { id } = await params;
-    const session = await requireApiAdmin(request);
+    const session = await requireApiPermission(request, "user:delete");
 
     // Luật "không tự xoá chính mình" do service giữ; handleApiError đổi
     // SelfDeletionError thành 409. Refresh token có onDelete: Cascade nên mọi

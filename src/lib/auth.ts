@@ -3,6 +3,8 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "./prisma";
+import type { Permission } from "./permissions";
+import { permissionService } from "@/services/permission.service";
 import {
   SESSION_COOKIE_NAME,
   SESSION_MAX_AGE_SECONDS,
@@ -15,10 +17,12 @@ import {
 const PUBLIC_USER_FIELDS = {
   id: true,
   email: true,
-  name: true,
-  role: true,
+  username: true,
+  fullName: true,
+  emailVerifiedAt: true,
   createdAt: true,
   updatedAt: true,
+  role: { select: { key: true, name: true } },
 } as const;
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;
@@ -43,10 +47,17 @@ export const getCurrentUser = cache(async () => {
   const session = await getSession();
   if (!session) return null;
 
-  return prisma.user.findUnique({
+  const row = await prisma.user.findUnique({
     where: { id: session.sub },
     select: PUBLIC_USER_FIELDS,
   });
+
+  if (!row) return null;
+
+  // Làm phẳng `role` thành khoá dạng chuỗi, giống `userService.toPublicUser`.
+  // Nhờ vậy giao diện vẫn viết `user.role === "ADMIN"` như khi còn dùng enum.
+  const { role, ...rest } = row;
+  return { ...rest, role: role.key, roleName: role.name };
 });
 
 /** Dùng trong page/layout. Chưa đăng nhập thì đá về /login. */
@@ -64,10 +75,32 @@ export async function requireUser(returnTo?: string): Promise<CurrentUser> {
  *
  * Người đã đăng nhập nhưng không đủ quyền nhận 404 chứ không phải 403: 403 xác
  * nhận cho họ biết tài nguyên đó có tồn tại.
+ *
+ * Kiểm tra theo VAI TRÒ. Khi câu hỏi là "được làm hành động gì" chứ không phải
+ * "có phải quản trị viên không", dùng `requirePermission` — nó không phải sửa
+ * lại khi sau này thêm vai trò mới.
  */
 export async function requireAdmin(returnTo?: string): Promise<CurrentUser> {
   const user = await requireUser(returnTo);
   if (user.role !== "ADMIN") notFound();
+  return user;
+}
+
+/**
+ * Dùng trong page/layout cần một quyền hạn cụ thể.
+ *
+ * Nên dùng thay cho `requireAdmin` ở phần lớn trường hợp: khi thêm vai trò mới
+ * (MANAGER, STAFF…), chỉ phải sửa bảng trong `permissions.ts`, không phải đi
+ * lùng từng chỗ đang so sánh `role === "ADMIN"`.
+ *
+ * Cũng trả 404 như `requireAdmin`, vì cùng một lý do.
+ */
+export async function requirePermission(
+  permission: Permission,
+  returnTo?: string,
+): Promise<CurrentUser> {
+  const user = await requireUser(returnTo);
+  if (!(await permissionService.can(user.role, permission))) notFound();
   return user;
 }
 

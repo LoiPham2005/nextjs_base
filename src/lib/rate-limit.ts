@@ -20,6 +20,25 @@ export const RATE_LIMITS = {
   login: { limit: 5, windowSeconds: 300 },
   register: { limit: 5, windowSeconds: 3600 },
   refresh: { limit: 30, windowSeconds: 300 },
+
+  /**
+   * Gửi email: siết chặt hơn hẳn các endpoint khác.
+   *
+   * Không phải để chống dò mật khẩu, mà để không bị biến thành công cụ dội thư
+   * rác — mỗi lần gọi là một email gửi tới địa chỉ do người gọi chỉ định. Chi
+   * phí nằm ở hộp thư người khác và ở uy tín tên miền gửi của bạn.
+   */
+  passwordResetRequest: { limit: 3, windowSeconds: 900 },
+  emailVerificationRequest: { limit: 3, windowSeconds: 900 },
+
+  /**
+   * Đổi/đặt lại mật khẩu bằng token.
+   *
+   * Token là 256 bit ngẫu nhiên nên không dò được, nhưng mỗi lần gọi đều tốn
+   * một phép băm Argon2id — vốn cố tình ngốn bộ nhớ. Không giới hạn thì chính
+   * endpoint này là đường tấn công từ chối dịch vụ rẻ nhất của hệ thống.
+   */
+  passwordChange: { limit: 10, windowSeconds: 900 },
 } as const satisfies Record<string, RateLimitOptions>;
 
 type Bucket = { count: number; resetAt: number };

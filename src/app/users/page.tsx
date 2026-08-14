@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { requireAdmin } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { userService } from "@/services/user.service";
 import { UserForm } from "./user-form";
 import { UserDeleteButton } from "./user-delete-button";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function UsersPage() {
   // Lớp bảo vệ ở tầng trang. Server Action còn tự kiểm tra lại một lần nữa —
   // xem `actions.ts` để biết vì sao không thể chỉ dựa vào chỗ này.
-  const currentUser = await requireAdmin("/users");
+  const currentUser = await requirePermission("user:read", "/users");
 
   const [users, total] = await Promise.all([userService.list(), userService.count()]);
 
@@ -55,8 +55,9 @@ export default async function UsersPage() {
                 <div className="user-info">
                   <span className="user-email">{user.email}</span>
                   <div className="user-meta">
-                    {user.name && <span>👤 {user.name}</span>}
-                    <span className="badge badge-success">{user.role}</span>
+                    {user.fullName && <span>👤 {user.fullName}</span>}
+                    {user.username && <span>@{user.username}</span>}
+                    <span className="badge badge-success">{user.roleName}</span>
                     <span>📅 {user.createdAt.toLocaleDateString("vi-VN")}</span>
                   </div>
                 </div>

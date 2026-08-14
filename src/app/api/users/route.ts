@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireApiAdmin } from "@/lib/api/auth";
+import { requireApiPermission } from "@/lib/api/auth";
 import { apiErrors, apiOk, handleApiError, parseJsonBody } from "@/lib/api/response";
 import { createUserSchema } from "@/schemas/user.schema";
 import { userService } from "@/services/user.service";
@@ -13,7 +13,7 @@ const listQuerySchema = z.object({
 
 export async function GET(request: Request) {
   try {
-    await requireApiAdmin(request);
+    await requireApiPermission(request, "user:read");
 
     const url = new URL(request.url);
     const parsed = listQuerySchema.safeParse({
@@ -43,11 +43,14 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    await requireApiAdmin(request);
+    await requireApiPermission(request, "user:create");
 
-    // createUserSchema có nhận `role`, và ở đây thì hợp lệ: người gọi đã được
-    // xác thực là ADMIN. Khác với form trên web, nơi role bị bỏ qua hoàn toàn
-    // vì bất kỳ ai cũng gửi được field ẩn.
+    // createUserSchema có nhận `roleKey`, và ở đây thì hợp lệ: người gọi đã
+    // được xác thực là ADMIN. Khác với form trên web, nơi vai trò bị bỏ qua
+    // hoàn toàn vì bất kỳ ai cũng gửi được field ẩn.
+    //
+    // Vai trò không tồn tại sẽ thành RoleNotFoundError từ userService, chứ
+    // không phải lỗi khoá ngoại thô của database.
     const body = await parseJsonBody(request, createUserSchema);
     const user = await userService.create(body);
 

@@ -10,9 +10,81 @@ datasource db {
   // `src/lib/prisma.ts` (cho runtime).
 }
 
-enum Role {
-  USER
-  ADMIN
+/// Vai trò, gán được lúc chạy.
+///
+/// Thay cho enum `Role` trước đây. Đánh đổi rất rõ ràng:
+///
+///   MẤT — TypeScript không còn kiểm tra được `role === "ADMIN"` lúc biên dịch,
+///   và mỗi lần phân quyền là một lần đọc dữ liệu (đã bù bằng cache trong
+///   `permission.service.ts`).
+///
+///   ĐƯỢC — quản trị viên tự tạo vai trò mới và tự tick quyền, không cần lập
+///   trình viên deploy. Đó là lý do duy nhất đáng để đánh đổi.
+///
+/// Danh mục quyền TỒN TẠI vẫn nằm trong code (`src/lib/permissions.ts`) — bảng
+/// dưới đây chỉ lưu việc GÁN quyền. Nhờ vậy tên quyền vẫn được TypeScript bắt
+/// lỗi, còn ai được làm gì thì sửa được lúc chạy.
+model Role {
+  id String @id @default(cuid())
+
+  /// Định danh dùng trong code và trong token, ví dụ `ADMIN`. Không đổi được
+  /// sau khi tạo — nó nằm trong các JWT đang lưu hành.
+  key String @unique
+
+  /// Tên hiển thị. Đây mới là thứ được phép sửa.
+  name        String
+  description String?
+
+  /// Vai trò hệ thống không xoá và không đổi `key` được.
+  ///
+  /// Không có cờ này thì một cú bấm nhầm xoá mất vai trò ADMIN là khoá cửa
+  /// toàn bộ hệ thống, và không còn ai đủ quyền để tạo lại.
+  isSystem Boolean @default(false)
+
+  permissions RolePermission[]
+  users       User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("roles")
+}
+
+/// Danh mục quyền hạn.
+///
+/// Bảng này được ĐỒNG BỘ TỪ CODE, không phải nơi khai báo. `pnpm db:seed` đọc
+/// `PERMISSIONS` trong `src/lib/permissions.ts` rồi thêm bản ghi còn thiếu.
+///
+/// Lý do: một quyền chỉ có ý nghĩa khi có mã nguồn kiểm tra nó. Cho phép tạo
+/// quyền mới từ giao diện sẽ sinh ra những dòng không ràng buộc điều gì —
+/// người quản trị tick vào mà không có tác dụng gì cả.
+model Permission {
+  id String @id @default(cuid())
+
+  /// Trùng với một giá trị trong hằng `PERMISSIONS`, ví dụ `user:read`.
+  key         String  @unique
+  description String?
+
+  roles RolePermission[]
+
+  createdAt DateTime @default(now())
+
+  @@map("permissions")
+}
+
+/// Bảng nối vai trò với quyền.
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
 }
 
 model User {
@@ -25,17 +97,44 @@ model User {
   /// mật khẩu "hợp lệ" nhìn từ phía tầng dữ liệu.
   password String?
 
-  name String?
-  role Role   @default(USER)
+  /// Tên đăng nhập, tuỳ chọn.
+  ///
+  /// Cho phép NULL vì tài khoản đăng ký bằng email hoặc tạo bởi admin có thể
+  /// chưa đặt. Trong PostgreSQL, ràng buộc UNIQUE bỏ qua NULL, nên nhiều tài
+  /// khoản cùng để trống vẫn hợp lệ.
+  ///
+  /// LUÔN lưu ở dạng chữ thường — chuẩn hoá trong `user.service.ts`. Không làm
+  /// vậy thì `Loi` và `loi` là hai tài khoản khác nhau, và người dùng sẽ không
+  /// hiểu vì sao đăng nhập được lúc này lúc không.
+  username String? @unique
+
+  /// Họ và tên đầy đủ, dùng để hiển thị.
+  ///
+  /// Đổi tên từ `name` cũ. Tách bạch với `username`: một cái để người khác đọc,
+  /// một cái để đăng nhập — trộn hai vai trò vào một cột luôn dẫn tới việc phải
+  /// tách ra sau này, lúc dữ liệu đã nhiều.
+  fullName String?
+
+  roleId String
+  role   Role   @relation(fields: [roleId], references: [id])
+
+  /// Thời điểm email được xác thực. Null nghĩa là chưa xác thực.
+  ///
+  /// Dùng DateTime thay vì boolean vì nó trả lời được cả hai câu hỏi: đã xác
+  /// thực chưa, và xác thực lúc nào — thông tin cần khi điều tra sự cố.
+  emailVerifiedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  refreshTokens RefreshToken[]
+  refreshTokens      RefreshToken[]
+  verificationTokens VerificationToken[]
 
   // Trang danh sách sắp xếp theo createdAt desc; không có index thì mỗi lần
   // mở trang là một lần full table scan + sort.
   @@index([createdAt])
+  // Cần cho câu hỏi "vai trò này còn ai đang dùng không" trước khi xoá vai trò.
+  @@index([roleId])
   @@map("users")
 }
 
@@ -69,4 +168,43 @@ model RefreshToken {
   @@index([userId])
   @@index([expiresAt])
   @@map("refresh_tokens")
+}
+
+enum VerificationTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+/// Token dùng một lần gửi qua email: xác thực địa chỉ, và đặt lại mật khẩu.
+///
+/// Gộp hai mục đích vào một bảng thay vì tách đôi, vì vòng đời của chúng giống
+/// hệt nhau — cấp, hết hạn, dùng một lần rồi thôi. Chỉ khác thời hạn, mà đó là
+/// tham số chứ không phải cấu trúc.
+model VerificationToken {
+  id String @id @default(cuid())
+
+  /// SHA-256 của token, KHÔNG phải token gốc — cùng lý do với RefreshToken.
+  /// Ở đây còn quan trọng hơn: token đặt lại mật khẩu bị lộ đồng nghĩa với
+  /// mất tài khoản, không cần biết mật khẩu cũ.
+  tokenHash String @unique
+
+  type VerificationTokenType
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime
+
+  /// Được set ngay khi token được dùng. Token đã dùng không bao giờ dùng lại
+  /// được — nếu không, một email cũ còn nằm trong hộp thư vẫn đặt lại được mật
+  /// khẩu sau nhiều tháng.
+  usedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// Tra "token chưa dùng gần nhất của user này thuộc loại này" khi cấp token
+  /// mới — mỗi lần cấp đều phải vô hiệu hoá token cũ cùng loại.
+  @@index([userId, type])
+  @@index([expiresAt])
+  @@map("verification_tokens")
 }

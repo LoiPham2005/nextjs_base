@@ -64,7 +64,10 @@ describe("createUserAction", () => {
     vi.mocked(userService.create).mockResolvedValue({
       id: "u-2",
       email: "new@example.com",
-      name: null,
+      username: "u",
+      fullName: null,
+      roleName: "Người dùng",
+      emailVerifiedAt: null,
       role: "USER",
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -72,7 +75,7 @@ describe("createUserAction", () => {
 
     await createUserAction({}, form({ email: "new@example.com", role: "ADMIN" }));
 
-    expect(vi.mocked(userService.create).mock.calls[0]?.[0].role).toBeUndefined();
+    expect(vi.mocked(userService.create).mock.calls[0]?.[0].roleKey).toBeUndefined();
   });
 
   it("trả lỗi theo field khi email sai định dạng", async () => {
@@ -121,7 +124,10 @@ describe("deleteUserAction", () => {
     vi.mocked(userService.delete).mockResolvedValue({
       id: "victim-id",
       email: "victim@example.com",
-      name: null,
+      username: "u",
+      fullName: null,
+      roleName: "Người dùng",
+      emailVerifiedAt: null,
       role: "USER",
       createdAt: new Date(),
       updatedAt: new Date(),

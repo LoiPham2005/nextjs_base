@@ -60,6 +60,21 @@ const envSchema = z.object({
   /** Hạn refresh token. Thu hồi được vì nó nằm trong database. */
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().max(365).default(30),
 
+  /**
+   * Hạn của link xác thực email.
+   *
+   * Dài hơn hẳn link đặt lại mật khẩu vì mức thiệt hại khác nhau: link xác thực
+   * bị lộ chỉ giúp kẻ khác xác nhận hộ một địa chỉ, còn link đặt lại mật khẩu
+   * bị lộ là mất tài khoản.
+   */
+  EMAIL_VERIFICATION_TTL_HOURS: z.coerce.number().int().positive().max(168).default(24),
+
+  /** Hạn của link đặt lại mật khẩu. Ngắn có chủ đích — xem lý do ở trên. */
+  PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().positive().max(1440).default(60),
+
+  /** Địa chỉ người gửi trên email hệ thống. */
+  MAIL_FROM: emptyAsUndefined(z.string().min(1).optional()),
+
   ADMIN_EMAIL: emptyAsUndefined(z.email("ADMIN_EMAIL không hợp lệ").optional()),
   ADMIN_PASSWORD: emptyAsUndefined(
     z.string().min(8, "ADMIN_PASSWORD tối thiểu 8 ký tự").optional(),

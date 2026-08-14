@@ -65,7 +65,7 @@ export async function loginAction(
     if (error instanceof InvalidCredentialsError) {
       return { error: error.message };
     }
-    logger.error("Login failed unexpectedly", error, { email: parsed.data.email });
+    logger.error("Login failed unexpectedly", error, { identifier: parsed.data.identifier });
     return { error: "Không thể đăng nhập lúc này. Vui lòng thử lại." };
   }
 

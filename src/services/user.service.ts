@@ -2,44 +2,131 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { CryptoUtils } from "@/lib/crypto";
-import type { CreateUserInput } from "@/schemas/user.schema";
+import { SYSTEM_ROLES } from "@/lib/permissions";
+import type { CreateUserInput, UpdateUserInput } from "@/schemas/user.schema";
 
-/** Không bao giờ trả cột `password` ra khỏi service. */
-const PUBLIC_USER_FIELDS = {
+/**
+ * Cột được phép rời khỏi service. Không bao giờ có `password`.
+ *
+ * `role` là quan hệ nên phải khai báo `select` lồng — nếu để `role: true`,
+ * Prisma trả về cả bản ghi vai trò kèm mốc thời gian, thừa và dễ lộ dần ra API.
+ */
+const USER_SELECT = {
   id: true,
   email: true,
-  name: true,
-  role: true,
+  username: true,
+  fullName: true,
+  emailVerifiedAt: true,
   createdAt: true,
   updatedAt: true,
+  role: { select: { key: true, name: true } },
 } as const;
 
-export type PublicUser = Prisma.UserGetPayload<{ select: typeof PUBLIC_USER_FIELDS }>;
+type UserRow = Prisma.UserGetPayload<{ select: typeof USER_SELECT }>;
+
+/**
+ * Hình dạng user trả ra ngoài.
+ *
+ * `role` được làm phẳng thành chuỗi khoá thay vì để nguyên object lồng. Nhờ
+ * vậy `user.role === "ADMIN"` vẫn viết được như khi còn dùng enum, và toàn bộ
+ * giao diện lẫn client mobile không phải sửa theo việc vai trò chuyển xuống
+ * database.
+ */
+export type PublicUser = {
+  id: string;
+  email: string;
+  username: string | null;
+  fullName: string | null;
+  /** Khoá vai trò, ví dụ `"ADMIN"`. */
+  role: string;
+  /** Tên hiển thị của vai trò, ví dụ `"Quản trị viên"`. */
+  roleName: string;
+  emailVerifiedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+function toPublicUser(row: UserRow): PublicUser {
+  const { role, ...rest } = row;
+  return { ...rest, role: role.key, roleName: role.name };
+}
+
+/**
+ * Chuẩn hoá email trước khi ghi và trước khi tra cứu.
+ *
+ * Không có bước này thì `Loi@example.com` và `loi@example.com` là hai tài
+ * khoản khác nhau — người dùng đăng ký một lần rồi không đăng nhập lại được vì
+ * gõ hoa chữ đầu. Tên miền email vốn không phân biệt hoa thường.
+ */
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
 
 /** Trần cứng cho `take`, để một query độc hại không kéo cả bảng về. */
 const MAX_PAGE_SIZE = 100;
 
 export class UserService {
+  /**
+   * Đổi khoá vai trò thành id.
+   *
+   * Tách riêng vì mọi đường ghi user đều cần, và vì vai trò không tồn tại phải
+   * cho ra lỗi nghiệp vụ đọc được, chứ không phải lỗi ràng buộc khoá ngoại thô
+   * từ database.
+   */
+  private async resolveRoleId(roleKey: string): Promise<string> {
+    const role = await prisma.role.findUnique({ where: { key: roleKey }, select: { id: true } });
+    if (!role) throw new RoleNotFoundError(roleKey);
+    return role.id;
+  }
+
   async create(input: CreateUserInput): Promise<PublicUser> {
     const password = input.password ? await CryptoUtils.hashPassword(input.password) : null;
+    const roleId = await this.resolveRoleId(input.roleKey ?? SYSTEM_ROLES.USER);
 
     try {
-      return await prisma.user.create({
+      const row = await prisma.user.create({
         data: {
-          email: input.email,
+          email: normalizeEmail(input.email),
           password,
-          name: input.name,
-          role: input.role ?? "USER",
+          username: input.username ?? null,
+          fullName: input.fullName ?? null,
+          roleId,
         },
-        select: PUBLIC_USER_FIELDS,
+        select: USER_SELECT,
       });
+
+      return toPublicUser(row);
     } catch (error) {
       // Dựa vào unique constraint thay vì "kiểm tra rồi mới ghi": hai request
       // đồng thời cùng một email đều vượt qua được bước kiểm tra, chỉ database
       // mới phân xử được.
       if (isPrismaError(error, "P2002")) {
-        throw new UserAlreadyExistsError(input.email);
+        throw duplicateFieldError(error, input);
       }
+      throw error;
+    }
+  }
+
+  async update(id: string, input: UpdateUserInput): Promise<PublicUser> {
+    const roleId = input.roleKey ? await this.resolveRoleId(input.roleKey) : undefined;
+
+    try {
+      const row = await prisma.user.update({
+        where: { id },
+        data: {
+          // `undefined` nghĩa là không đụng tới, `null` nghĩa là xoá giá trị.
+          // Phân biệt được hai cái đó là lý do schema dùng `.nullish()`.
+          ...(input.username !== undefined ? { username: input.username } : {}),
+          ...(input.fullName !== undefined ? { fullName: input.fullName } : {}),
+          ...(roleId ? { roleId } : {}),
+        },
+        select: USER_SELECT,
+      });
+
+      return toPublicUser(row);
+    } catch (error) {
+      if (isPrismaError(error, "P2025")) throw new UserNotFoundError(id);
+      if (isPrismaError(error, "P2002")) throw duplicateFieldError(error, input);
       throw error;
     }
   }
@@ -47,12 +134,14 @@ export class UserService {
   async list(options: { skip?: number; take?: number } = {}): Promise<PublicUser[]> {
     const take = Math.min(options.take ?? 50, MAX_PAGE_SIZE);
 
-    return prisma.user.findMany({
-      select: PUBLIC_USER_FIELDS,
+    const rows = await prisma.user.findMany({
+      select: USER_SELECT,
       orderBy: { createdAt: "desc" },
       skip: options.skip ?? 0,
       take,
     });
+
+    return rows.map(toPublicUser);
   }
 
   async count(): Promise<number> {
@@ -60,11 +149,24 @@ export class UserService {
   }
 
   async findById(id: string): Promise<PublicUser | null> {
-    return prisma.user.findUnique({ where: { id }, select: PUBLIC_USER_FIELDS });
+    const row = await prisma.user.findUnique({ where: { id }, select: USER_SELECT });
+    return row ? toPublicUser(row) : null;
   }
 
   async findByEmail(email: string): Promise<PublicUser | null> {
-    return prisma.user.findUnique({ where: { email }, select: PUBLIC_USER_FIELDS });
+    const row = await prisma.user.findUnique({
+      where: { email: normalizeEmail(email) },
+      select: USER_SELECT,
+    });
+    return row ? toPublicUser(row) : null;
+  }
+
+  async findByUsername(username: string): Promise<PublicUser | null> {
+    const row = await prisma.user.findUnique({
+      where: { username: username.trim().toLowerCase() },
+      select: USER_SELECT,
+    });
+    return row ? toPublicUser(row) : null;
   }
 
   /**
@@ -82,7 +184,8 @@ export class UserService {
     }
 
     try {
-      return await prisma.user.delete({ where: { id }, select: PUBLIC_USER_FIELDS });
+      const row = await prisma.user.delete({ where: { id }, select: USER_SELECT });
+      return toPublicUser(row);
     } catch (error) {
       if (isPrismaError(error, "P2025")) {
         throw new UserNotFoundError(id);
@@ -96,6 +199,35 @@ function isPrismaError(error: unknown, code: string): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
 }
 
+/**
+ * Đổi lỗi trùng khoá của Prisma thành lỗi nghiệp vụ nói rõ trường nào bị trùng.
+ *
+ * Người dùng cần biết là trùng email hay trùng tên đăng nhập — hai việc phải
+ * sửa khác hẳn nhau.
+ */
+function duplicateFieldError(
+  error: unknown,
+  input: { email?: string; username?: string | null },
+): Error {
+  const target =
+    error instanceof Prisma.PrismaClientKnownRequestError ? error.meta?.target : undefined;
+
+  // `meta.target` được Prisma khai báo là `unknown`: tuỳ database, nó có thể là
+  // mảng tên cột, một chuỗi, hoặc không có gì. Chỉ hai dạng đầu mới dùng được;
+  // dạng khác thì coi như không biết trường nào trùng và rơi về lỗi mặc định.
+  const fields = Array.isArray(target)
+    ? target.filter((item): item is string => typeof item === "string")
+    : typeof target === "string"
+      ? [target]
+      : [];
+
+  if (fields.some((field) => field.includes("username")) && input.username) {
+    return new UsernameAlreadyExistsError(input.username);
+  }
+
+  return new UserAlreadyExistsError(input.email ?? "");
+}
+
 export class UserAlreadyExistsError extends Error {
   constructor(email: string) {
     super(`Email "${email}" đã được sử dụng`);
@@ -103,10 +235,24 @@ export class UserAlreadyExistsError extends Error {
   }
 }
 
+export class UsernameAlreadyExistsError extends Error {
+  constructor(username: string) {
+    super(`Tên đăng nhập "${username}" đã được sử dụng`);
+    this.name = "UsernameAlreadyExistsError";
+  }
+}
+
 export class UserNotFoundError extends Error {
   constructor(id: string) {
     super(`Không tìm thấy người dùng có id "${id}"`);
     this.name = "UserNotFoundError";
+  }
+}
+
+export class RoleNotFoundError extends Error {
+  constructor(roleKey: string) {
+    super(`Không tìm thấy vai trò "${roleKey}"`);
+    this.name = "RoleNotFoundError";
   }
 }
 

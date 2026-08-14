@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logger } from "@/lib/logger";
-import { InvalidCredentialsError } from "@/services/auth.service";
+import { InvalidCredentialsError, InvalidVerificationTokenError } from "@/services/auth.service";
 import { RefreshTokenReuseError } from "@/services/token.service";
 import {
+  RoleNotFoundError,
   SelfDeletionError,
   UserAlreadyExistsError,
+  UsernameAlreadyExistsError,
   UserNotFoundError,
 } from "@/services/user.service";
 
@@ -112,6 +114,12 @@ export function handleApiError(error: unknown, context?: Record<string, unknown>
     return handleApiError(new ApiError(401, "UNAUTHENTICATED", error.message));
   }
 
+  // 400 chứ không phải 401: người dùng chưa từng đăng nhập trong luồng này,
+  // nên "chưa xác thực" là thông điệp sai. Vấn đề nằm ở cái link họ vừa bấm.
+  if (error instanceof InvalidVerificationTokenError) {
+    return handleApiError(new ApiError(400, "VALIDATION_ERROR", error.message));
+  }
+
   if (error instanceof RefreshTokenReuseError) {
     logger.warn("Refresh token reuse detected", { userId: error.userId });
     return handleApiError(
@@ -119,8 +127,18 @@ export function handleApiError(error: unknown, context?: Record<string, unknown>
     );
   }
 
-  if (error instanceof UserAlreadyExistsError || error instanceof SelfDeletionError) {
+  if (
+    error instanceof UserAlreadyExistsError ||
+    error instanceof UsernameAlreadyExistsError ||
+    error instanceof SelfDeletionError
+  ) {
     return handleApiError(apiErrors.conflict(error.message));
+  }
+
+  // 422 chứ không phải 404: tài nguyên bị hỏi tới (user) không hề thiếu — dữ
+  // liệu gửi lên mới là thứ sai, ở đúng một trường cụ thể.
+  if (error instanceof RoleNotFoundError) {
+    return handleApiError(apiErrors.validation({ roleKey: [error.message] }));
   }
 
   if (error instanceof UserNotFoundError) {
