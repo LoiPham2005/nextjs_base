@@ -19,6 +19,7 @@ const USER_SELECT = {
   fullName: true,
   emailVerifiedAt: true,
   status: true,
+  lockedUntil: true,
   createdAt: true,
   updatedAt: true,
   role: { select: { key: true, name: true } },
@@ -48,6 +49,8 @@ export type PublicUser = {
   roleName: string;
   emailVerifiedAt: Date | null;
   status: UserStatus;
+  /** Khoá tạm tự động do sai mật khẩu liên tiếp — null/quá khứ = không bị khoá. */
+  lockedUntil: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };

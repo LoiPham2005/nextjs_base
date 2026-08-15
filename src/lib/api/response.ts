@@ -11,6 +11,7 @@ import { RefreshTokenReuseError } from "@/services/token.service";
 import {
   RoleNotFoundError,
   SelfDeletionError,
+  SelfStatusChangeError,
   UserAlreadyExistsError,
   UsernameAlreadyExistsError,
   UserNotFoundError,
@@ -152,7 +153,8 @@ export function handleApiError(error: unknown, context?: Record<string, unknown>
   if (
     error instanceof UserAlreadyExistsError ||
     error instanceof UsernameAlreadyExistsError ||
-    error instanceof SelfDeletionError
+    error instanceof SelfDeletionError ||
+    error instanceof SelfStatusChangeError
   ) {
     return handleApiError(apiErrors.conflict(error.message));
   }

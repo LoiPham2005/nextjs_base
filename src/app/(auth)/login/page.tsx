@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { OAuthButtons, OAuthErrorBanner } from "../oauth-buttons";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Đăng nhập" };
@@ -7,9 +8,9 @@ export const metadata: Metadata = { title: "Đăng nhập" };
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ next?: string; oauthError?: string }>;
 }) {
-  const { next } = await searchParams;
+  const { next, oauthError } = await searchParams;
 
   return (
     <main className="container" style={{ maxWidth: 440 }}>
@@ -18,6 +19,9 @@ export default async function LoginPage({
         <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 24 }}>
           Nhập thông tin tài khoản của bạn để tiếp tục.
         </p>
+
+        <OAuthErrorBanner code={oauthError} />
+        <OAuthButtons next={next} />
 
         <LoginForm nextPath={next} />
 

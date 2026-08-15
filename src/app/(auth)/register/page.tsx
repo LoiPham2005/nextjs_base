@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { OAuthButtons } from "../oauth-buttons";
 import { RegisterForm } from "./register-form";
 
 export const metadata: Metadata = { title: "Đăng ký" };
@@ -12,6 +13,8 @@ export default function RegisterPage() {
         <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 24 }}>
           Tài khoản mới luôn được tạo với quyền USER.
         </p>
+
+        <OAuthButtons />
 
         <RegisterForm />
 

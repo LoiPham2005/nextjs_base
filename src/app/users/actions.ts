@@ -4,10 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getSession } from "@/lib/auth";
 import { logger } from "@/lib/logger";
-import { createUserSchema } from "@/schemas/user.schema";
+import { createUserSchema, userStatusSchema, type UserStatusInput } from "@/schemas/user.schema";
 import {
   userService,
   SelfDeletionError,
+  SelfStatusChangeError,
   UserAlreadyExistsError,
   UserNotFoundError,
 } from "@/services/user.service";
@@ -62,6 +63,51 @@ export async function createUserAction(
     }
     logger.error("Create user failed", error, { email: parsed.data.email });
     return { error: "Không thể tạo người dùng lúc này. Vui lòng thử lại." };
+  }
+
+  revalidatePath("/users");
+  return {};
+}
+
+export async function setUserStatusAction(
+  id: string,
+  status: UserStatusInput,
+): Promise<{ error?: string }> {
+  const denied = await denyIfNotAdmin();
+  if (denied) return denied;
+
+  const parsed = userStatusSchema.safeParse(status);
+  if (!parsed.success) return { error: "Trạng thái không hợp lệ" };
+
+  const session = await getSession();
+
+  try {
+    await userService.setStatus(id, parsed.data, session?.sub ?? "");
+  } catch (error) {
+    if (error instanceof SelfStatusChangeError || error instanceof UserNotFoundError) {
+      return { error: error.message };
+    }
+    logger.error("Set user status failed", error, { targetUserId: id, status });
+    return { error: "Không thể đổi trạng thái lúc này. Vui lòng thử lại." };
+  }
+
+  revalidatePath("/users");
+  return {};
+}
+
+/** Mở khoá sớm — bỏ qua thời gian còn lại của `lockedUntil` (khoá tự động do brute-force). */
+export async function unlockUserAction(id: string): Promise<{ error?: string }> {
+  const denied = await denyIfNotAdmin();
+  if (denied) return denied;
+
+  try {
+    await userService.unlock(id);
+  } catch (error) {
+    if (error instanceof UserNotFoundError) {
+      return { error: error.message };
+    }
+    logger.error("Unlock user failed", error, { targetUserId: id });
+    return { error: "Không thể mở khoá lúc này. Vui lòng thử lại." };
   }
 
   revalidatePath("/users");

@@ -47,6 +47,7 @@ export const userSchema = z.object({
   roleName: z.string(),
   emailVerifiedAt: z.coerce.date().nullable(),
   status: userStatusSchema,
+  lockedUntil: z.coerce.date().nullable(),
   createdAt: z.coerce.date(),
 });
 export type User = z.infer<typeof userSchema>;

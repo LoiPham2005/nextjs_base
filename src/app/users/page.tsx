@@ -4,6 +4,7 @@ import { requirePermission } from "@/lib/auth";
 import { userService } from "@/services/user.service";
 import { UserForm } from "./user-form";
 import { UserDeleteButton } from "./user-delete-button";
+import { UserStatusButton } from "./user-status-button";
 
 export const metadata: Metadata = { title: "Quản lý người dùng" };
 export const dynamic = "force-dynamic";
@@ -58,13 +59,29 @@ export default async function UsersPage() {
                     {user.fullName && <span>👤 {user.fullName}</span>}
                     {user.username && <span>@{user.username}</span>}
                     <span className="badge badge-success">{user.roleName}</span>
+                    {user.status === "BANNED" && (
+                      <span className="badge badge-danger">Đã khoá</span>
+                    )}
+                    {user.status === "ACTIVE" &&
+                      user.lockedUntil &&
+                      user.lockedUntil > new Date() && (
+                        <span className="badge badge-warning">Khoá tạm (sai mật khẩu)</span>
+                      )}
                     <span>📅 {user.createdAt.toLocaleDateString("vi-VN")}</span>
                   </div>
                 </div>
                 {user.id === currentUser.id ? (
                   <span className="badge badge-primary">Bạn</span>
                 ) : (
-                  <UserDeleteButton id={user.id} email={user.email} />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <UserStatusButton
+                      id={user.id}
+                      email={user.email}
+                      status={user.status}
+                      lockedUntil={user.lockedUntil?.toISOString() ?? null}
+                    />
+                    <UserDeleteButton id={user.id} email={user.email} />
+                  </div>
                 )}
               </li>
             ))}

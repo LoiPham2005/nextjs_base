@@ -94,13 +94,7 @@ export class AuthService {
       await this.upgradePasswordHash(user.id, input.password);
     }
 
-    const {
-      password: _password,
-      failedLoginAttempts: _failedLoginAttempts,
-      lockedUntil: _lockedUntil,
-      role,
-      ...rest
-    } = user;
+    const { password: _password, failedLoginAttempts: _failedLoginAttempts, role, ...rest } = user;
     return { ...rest, role: role.key, roleName: role.name };
   }
 

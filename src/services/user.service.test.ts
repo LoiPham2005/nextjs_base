@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import {
   RoleNotFoundError,
   SelfDeletionError,
+  SelfStatusChangeError,
   UserAlreadyExistsError,
   UserNotFoundError,
   UserService,
@@ -14,8 +15,8 @@ vi.mock("@/lib/prisma", () => ({
       create: vi.fn(),
       update: vi.fn(),
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       findUnique: vi.fn(),
-      delete: vi.fn(),
       count: vi.fn(),
     },
     // Vai trò nằm trong database từ khi bỏ enum `Role`, nên mọi đường ghi user
@@ -33,10 +34,18 @@ vi.mock("@/lib/crypto", () => ({
   },
 }));
 
+// `delete()` (xoá mềm) thu hồi refresh token thay vì trông chờ cascade —
+// tách khỏi Prisma thật nên chỉ cần biết nó CÓ được gọi, không cần mô phỏng
+// bảng refresh_tokens ở đây.
+vi.mock("./token.service", () => ({
+  tokenService: { revokeAllForUser: vi.fn() },
+}));
+
 import { prisma } from "@/lib/prisma";
+import { tokenService } from "./token.service";
 
 /**
- * `create`/`delete` được gọi kèm `select` lồng cho quan hệ `role`, nên kiểu
+ * `create`/`update` được gọi kèm `select` lồng cho quan hệ `role`, nên kiểu
  * Prisma sinh ra không khớp fixture rút gọn. Gói lại một chỗ.
  */
 function row(overrides: Record<string, unknown> = {}) {
@@ -46,6 +55,7 @@ function row(overrides: Record<string, unknown> = {}) {
     username: "user",
     fullName: "User",
     emailVerifiedAt: null,
+    status: "ACTIVE",
     createdAt: new Date("2026-01-01"),
     updatedAt: new Date("2026-01-01"),
     role: { key: "USER", name: "Người dùng" },
@@ -161,9 +171,9 @@ describe("UserService", () => {
     });
   });
 
-  describe("delete", () => {
+  describe("delete (xoá mềm)", () => {
     it("đổi lỗi P2025 thành UserNotFoundError", async () => {
-      vi.mocked(prisma.user.delete).mockRejectedValue(prismaError("P2025"));
+      vi.mocked(prisma.user.update).mockRejectedValue(prismaError("P2025"));
 
       await expect(service.delete("missing", "admin-1")).rejects.toThrow(UserNotFoundError);
     });
@@ -173,19 +183,69 @@ describe("UserService", () => {
     it("chặn tự xoá chính mình, và không hề chạm tới database", async () => {
       await expect(service.delete("u-1", "u-1")).rejects.toThrow(SelfDeletionError);
 
-      expect(prisma.user.delete).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
-    it("cho phép xoá người khác", async () => {
-      vi.mocked(prisma.user.delete).mockResolvedValue(sampleUser);
+    it("set deletedAt, giải phóng email/username, và thu hồi refresh token", async () => {
+      vi.mocked(prisma.user.update).mockResolvedValue(sampleUser);
 
-      await expect(service.delete("u-2", "admin-1")).resolves.toBeDefined();
+      await service.delete("u-2", "admin-1");
+
+      const callArgs = vi.mocked(prisma.user.update).mock.calls[0]?.[0];
+      expect(callArgs).toMatchObject({
+        where: { id: "u-2", deletedAt: null },
+        data: { email: "deleted_u-2@deleted.invalid", username: null },
+      });
+      expect(callArgs?.data).toHaveProperty("deletedAt");
+      expect(tokenService.revokeAllForUser).toHaveBeenCalledWith("u-2");
     });
 
     it("actorId = null (tiến trình hệ thống) thì không bị chặn", async () => {
-      vi.mocked(prisma.user.delete).mockResolvedValue(sampleUser);
+      vi.mocked(prisma.user.update).mockResolvedValue(sampleUser);
 
       await expect(service.delete("u-1", null)).resolves.toBeDefined();
+    });
+  });
+
+  describe("setStatus", () => {
+    it("chặn tự khoá/mở khoá chính mình", async () => {
+      await expect(service.setStatus("admin-1", "BANNED", "admin-1")).rejects.toThrow(
+        SelfStatusChangeError,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it("khoá tài khoản người khác", async () => {
+      vi.mocked(prisma.user.update).mockResolvedValue(row({ status: "BANNED" }));
+
+      const user = await service.setStatus("u-2", "BANNED", "admin-1");
+
+      expect(user.status).toBe("BANNED");
+      expect(vi.mocked(prisma.user.update).mock.calls[0]?.[0]).toMatchObject({
+        where: { id: "u-2", deletedAt: null },
+        data: { status: "BANNED" },
+      });
+    });
+
+    it("đổi lỗi P2025 thành UserNotFoundError", async () => {
+      vi.mocked(prisma.user.update).mockRejectedValue(prismaError("P2025"));
+
+      await expect(service.setStatus("missing", "BANNED", "admin-1")).rejects.toThrow(
+        UserNotFoundError,
+      );
+    });
+  });
+
+  describe("unlock", () => {
+    it("xoá bộ đếm sai mật khẩu và mốc khoá tạm", async () => {
+      vi.mocked(prisma.user.update).mockResolvedValue(sampleUser);
+
+      await service.unlock("u-1");
+
+      expect(vi.mocked(prisma.user.update).mock.calls[0]?.[0]).toMatchObject({
+        where: { id: "u-1", deletedAt: null },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      });
     });
   });
 });
