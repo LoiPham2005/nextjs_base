@@ -105,14 +105,39 @@ FROM accounts a
 JOIN users u ON u.id = a."userId";
 ```
 
-## Bảo mật khi kết nối
+## Kết nối tới database production (trên VPS)
 
-`docker-compose.yml` map cổng `5432` ra host (`ports: "5432:5432"`) để DBeaver/
-Prisma Studio ở máy dev kết nối được. Trên VPS/production, **không mở port này
-ra internet** — chỉ kết nối qua SSH tunnel:
+Cả hai công cụ đều dùng được với DB production, không phải chỉ local — DBeaver
+và Prisma Studio luôn chạy trên MÁY BẠN, chỉ cần *kết nối mạng* tới được cổng
+Postgres của VPS. Vấn đề duy nhất là kết nối bằng cách nào cho an toàn.
+
+`docker-compose.yml` map cổng `5432` ra host (`ports: "5432:5432"`) để tiện
+dùng lúc dev. Trên VPS/production, **không bao giờ mở port này ra internet** —
+mở port 5432 công khai là cách nhanh nhất bị bot quét và brute-force. Luôn đi
+qua SSH tunnel:
+
+### DBeaver — có tunnel sẵn trong app
+
+Khi tạo/sửa connection: tab **SSH** → tick **Use SSH Tunnel** → điền IP VPS,
+user SSH, chọn private key (hoặc mật khẩu). DBeaver tự mở tunnel mỗi lần kết
+nối, không cần mở terminal riêng.
+
+### Prisma Studio — tự mở tunnel bằng tay
+
+Prisma Studio không có tunnel tích hợp — bản thân nó chỉ là process đọc
+`DATABASE_URL` rồi mở `localhost:5555`. Mở tunnel trước:
 
 ```bash
 ssh -L 5433:localhost:5432 user@your-vps-ip
 ```
 
-rồi trỏ DBeaver vào `localhost:5433` thay vì gõ thẳng IP VPS vào ô Host.
+rồi tạm trỏ `DATABASE_URL` sang cổng vừa forward và chạy Studio:
+
+```bash
+DATABASE_URL="postgresql://postgres:<mật_khẩu_prod>@localhost:5433/nextjs_prisma_base" pnpm db:studio
+```
+
+> ⚠️ Prisma Studio cho sửa tay trực tiếp, bỏ qua toàn bộ logic nghiệp vụ (xem
+> mục cảnh báo ở trên) — rủi ro cao hơn hẳn khi trỏ vào data THẬT. Ưu tiên
+> DBeaver (chủ yếu chỉ đọc/SQL có kiểm soát) cho production; chỉ mở Prisma
+> Studio vào prod khi thật sự cần sửa, và cẩn thận gấp đôi so với lúc dùng ở dev.
