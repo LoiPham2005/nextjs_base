@@ -6,27 +6,20 @@ import { z } from "zod";
 import { createSession, destroySession } from "@/lib/auth";
 import { logger } from "@/lib/logger";
 import { RATE_LIMITS, rateLimit, resetRateLimit } from "@/lib/rate-limit";
+import { safeRedirectPath } from "@/lib/safe-redirect";
 import { loginSchema, registerSchema } from "@/schemas/auth.schema";
-import { authService, InvalidCredentialsError } from "@/services/auth.service";
+import {
+  AccountBannedError,
+  AccountLockedError,
+  authService,
+  InvalidCredentialsError,
+} from "@/services/auth.service";
 import { UserAlreadyExistsError } from "@/services/user.service";
 
 export type AuthFormState = {
   error?: string;
-  fieldErrors?: Partial<Record<"email" | "password" | "name", string[]>>;
+  fieldErrors?: Partial<Record<"identifier" | "email" | "password" | "fullName", string[]>>;
 };
-
-/**
- * Chỉ chấp nhận đường dẫn nội bộ.
- *
- * `//evil.com` là một path hợp lệ về mặt cú pháp nhưng trình duyệt hiểu là
- * protocol-relative URL và sẽ rời khỏi site — đây chính là lỗ hổng open
- * redirect kinh điển trên tham số `?next=`.
- */
-function safeRedirectPath(value: FormDataEntryValue | null, fallback: string): string {
-  if (typeof value !== "string") return fallback;
-  if (!value.startsWith("/") || value.startsWith("//")) return fallback;
-  return value;
-}
 
 async function getClientKey(scope: string): Promise<string> {
   const headerList = await headers();
@@ -50,7 +43,7 @@ export async function loginAction(
   }
 
   const parsed = loginSchema.safeParse({
-    email: formData.get("email"),
+    identifier: formData.get("identifier"),
     password: formData.get("password"),
   });
 
@@ -62,7 +55,11 @@ export async function loginAction(
   try {
     user = await authService.validateCredentials(parsed.data);
   } catch (error) {
-    if (error instanceof InvalidCredentialsError) {
+    if (
+      error instanceof InvalidCredentialsError ||
+      error instanceof AccountBannedError ||
+      error instanceof AccountLockedError
+    ) {
       return { error: error.message };
     }
     logger.error("Login failed unexpectedly", error, { identifier: parsed.data.identifier });
@@ -93,7 +90,7 @@ export async function registerAction(
   const parsed = registerSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
-    name: formData.get("name") || undefined,
+    fullName: formData.get("fullName") || undefined,
   });
 
   if (!parsed.success) {

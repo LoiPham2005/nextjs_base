@@ -1,7 +1,7 @@
 import type { AuthFormState } from "./actions";
 
 export type Field = {
-  name: "email" | "password" | "name";
+  name: "identifier" | "email" | "password" | "fullName";
   label: string;
   type?: string;
   placeholder?: string;

@@ -48,6 +48,11 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+enum UserStatus {
+  ACTIVE
+  BANNED
+}
+
 model User {
   id                 String              @id @default(cuid())
   email              String              @unique
@@ -57,15 +62,43 @@ model User {
   roleId             String
   role               Role                @relation(fields: [roleId], references: [id])
   emailVerifiedAt    DateTime?           // Thời điểm xác thực email
+  status             UserStatus          @default(ACTIVE) // Khoá tài khoản do admin (BANNED) — thủ công, không tự hết hạn
+  failedLoginAttempts Int                @default(0) // Reset về 0 khi đăng nhập đúng
+  lockedUntil        DateTime?           // Khoá tạm do sai mật khẩu liên tiếp — tự hết hạn, khác với status
+  deletedAt          DateTime?           // Xoá mềm. null = còn hoạt động
+
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
   refreshTokens      RefreshToken[]
   verificationTokens VerificationToken[]
+  accounts           Account[]
 
   @@index([createdAt])
   @@index([roleId])
+  @@index([status])
   @@map("users")
+}
+
+/**
+ * Tài khoản mạng xã hội liên kết (Google/Github/Facebook/Apple).
+ *
+ * Cố ý KHÔNG lưu access/refresh token của provider: bảng này chỉ phục vụ đăng
+ * nhập (xác định "đây là user nào"), không gọi lại API của Google/Github thay
+ * mặt người dùng sau đó. Lưu token mà không dùng là giữ một bí mật không cần
+ * thiết — nếu sau này cần gọi API thay mặt user thì thêm cột lúc đó.
+ */
+model Account {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String   // "google" | "github" | "facebook" | "apple"
+  providerAccountId String   // id người dùng phía provider (sub/id)
+  createdAt         DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
 }
 
 model RefreshToken {

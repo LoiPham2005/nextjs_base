@@ -8,7 +8,7 @@ const initialState: AuthFormState = {};
 
 const FIELDS: Field[] = [
   {
-    name: "name",
+    name: "fullName",
     label: "Tên hiển thị",
     placeholder: "Nguyễn Văn A",
     autoComplete: "name",

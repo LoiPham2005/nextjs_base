@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { CryptoUtils } from "@/lib/crypto";
+import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { sendPasswordResetEmail, sendVerificationEmail } from "@/lib/emails";
 import { SYSTEM_ROLES } from "@/lib/permissions";
@@ -28,6 +29,11 @@ export class AuthService {
    * Ba nhánh thất bại — email không tồn tại, tài khoản chưa đặt mật khẩu, sai
    * mật khẩu — đều ném cùng một lỗi và đều tiêu tốn thời gian như nhau. Nếu
    * không, chỉ cần đo thời gian phản hồi là biết được email nào đã đăng ký.
+   *
+   * Tài khoản BANNED hoặc đang lockedUntil chỉ bị tiết lộ SAU KHI mật khẩu đã
+   * đúng — xem `registerFailedAttempt`. Tiết lộ trước khi xác minh mật khẩu là
+   * một oracle: kẻ dò mật khẩu mù sẽ biết tài khoản nào tồn tại/đã bị khoá mà
+   * không cần đoán trúng gì.
    */
   async validateCredentials(input: LoginInput): Promise<PublicUser> {
     // Ký tự `@` là thứ duy nhất phân biệt được hai loại: `usernameSchema` cấm
@@ -36,7 +42,9 @@ export class AuthService {
     const isEmail = identifier.includes("@");
 
     const user = await prisma.user.findUnique({
-      where: isEmail ? { email: identifier } : { username: identifier },
+      where: isEmail
+        ? { email: identifier, deletedAt: null }
+        : { username: identifier, deletedAt: null },
       select: {
         id: true,
         email: true,
@@ -44,6 +52,9 @@ export class AuthService {
         fullName: true,
         password: true,
         emailVerifiedAt: true,
+        status: true,
+        failedLoginAttempts: true,
+        lockedUntil: true,
         createdAt: true,
         updatedAt: true,
         role: { select: { key: true, name: true } },
@@ -56,16 +67,70 @@ export class AuthService {
     }
 
     const check = await CryptoUtils.verifyPassword(input.password, user.password);
+
     if (!check.valid) {
+      await this.registerFailedAttempt(user.id, Boolean(user.lockedUntil && user.lockedUntil > new Date()));
       throw new InvalidCredentialsError();
+    }
+
+    if (user.status === "BANNED") {
+      throw new AccountBannedError();
+    }
+
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      throw new AccountLockedError(user.lockedUntil);
+    }
+
+    // Đăng nhập đúng sau một chuỗi lần sai trước đó — xoá dấu vết, đừng bắt họ
+    // trả giá cho những lần gõ nhầm đã qua.
+    if (user.failedLoginAttempts > 0) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      });
     }
 
     if (check.needsRehash) {
       await this.upgradePasswordHash(user.id, input.password);
     }
 
-    const { password: _password, role, ...rest } = user;
+    const {
+      password: _password,
+      failedLoginAttempts: _failedLoginAttempts,
+      lockedUntil: _lockedUntil,
+      role,
+      ...rest
+    } = user;
     return { ...rest, role: role.key, roleName: role.name };
+  }
+
+  /**
+   * Tăng bộ đếm sai mật khẩu; khoá tạm khi chạm ngưỡng.
+   *
+   * Bổ sung cho rate-limit theo IP (`enforceRateLimit`): rate-limit chặn một
+   * IP dò nhiều tài khoản, còn cái này chặn nhiều IP cùng dò một tài khoản.
+   *
+   * Không tăng/khoá lại nếu đã đang bị khoá — tránh một loạt request tới
+   * trong lúc khoá cứ đẩy `lockedUntil` lùi thêm vô hạn.
+   */
+  private async registerFailedAttempt(userId: string, alreadyLocked: boolean): Promise<void> {
+    if (alreadyLocked) return;
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { failedLoginAttempts: { increment: 1 } },
+      select: { failedLoginAttempts: true },
+    });
+
+    if (updated.failedLoginAttempts >= env.LOGIN_MAX_FAILED_ATTEMPTS) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          failedLoginAttempts: 0,
+          lockedUntil: new Date(Date.now() + env.LOGIN_LOCKOUT_MINUTES * 60 * 1000),
+        },
+      });
+    }
   }
 
   /**
@@ -230,6 +295,23 @@ export class InvalidCredentialsError extends Error {
   constructor() {
     super("Email hoặc mật khẩu không chính xác");
     this.name = "InvalidCredentialsError";
+  }
+}
+
+/** Khoá thủ công bởi admin (`UserStatus.BANNED`) — không tự hết hạn. */
+export class AccountBannedError extends Error {
+  constructor() {
+    super("Tài khoản đã bị khoá. Vui lòng liên hệ quản trị viên.");
+    this.name = "AccountBannedError";
+  }
+}
+
+/** Khoá tạm tự động do sai mật khẩu liên tiếp — tự hết hạn tại `lockedUntil`. */
+export class AccountLockedError extends Error {
+  constructor(readonly lockedUntil: Date) {
+    const minutes = Math.max(1, Math.ceil((lockedUntil.getTime() - Date.now()) / 60_000));
+    super(`Tài khoản tạm khoá do đăng nhập sai quá nhiều lần. Thử lại sau ${minutes} phút.`);
+    this.name = "AccountLockedError";
   }
 }
 

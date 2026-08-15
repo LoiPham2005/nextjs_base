@@ -134,6 +134,7 @@ describe("POST /api/users", () => {
       fullName: null,
       roleName: "Người dùng",
       emailVerifiedAt: null,
+      status: "ACTIVE",
       role: "ADMIN",
       createdAt: new Date(),
       updatedAt: new Date(),

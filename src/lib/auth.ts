@@ -48,7 +48,7 @@ export const getCurrentUser = cache(async () => {
   if (!session) return null;
 
   const row = await prisma.user.findUnique({
-    where: { id: session.sub },
+    where: { id: session.sub, deletedAt: null },
     select: PUBLIC_USER_FIELDS,
   });
 

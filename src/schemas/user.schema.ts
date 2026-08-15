@@ -29,6 +29,15 @@ export const updateUserSchema = z.object({
 });
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 
+/** Khoá thủ công do admin — xem ghi chú enum `UserStatus` trong schema.prisma. */
+export const userStatusSchema = z.enum(["ACTIVE", "BANNED"]);
+export type UserStatusInput = z.infer<typeof userStatusSchema>;
+
+export const updateUserStatusSchema = z.object({
+  status: userStatusSchema,
+});
+export type UpdateUserStatusInput = z.infer<typeof updateUserStatusSchema>;
+
 export const userSchema = z.object({
   id: z.string(),
   email: z.email(),
@@ -37,6 +46,7 @@ export const userSchema = z.object({
   role: roleKeySchema,
   roleName: z.string(),
   emailVerifiedAt: z.coerce.date().nullable(),
+  status: userStatusSchema,
   createdAt: z.coerce.date(),
 });
 export type User = z.infer<typeof userSchema>;

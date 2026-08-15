@@ -1,8 +1,9 @@
 import "server-only";
-import { Prisma } from "@prisma/client";
+import { Prisma, type UserStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { CryptoUtils } from "@/lib/crypto";
 import { SYSTEM_ROLES } from "@/lib/permissions";
+import { tokenService } from "./token.service";
 import type { CreateUserInput, UpdateUserInput } from "@/schemas/user.schema";
 
 /**
@@ -17,10 +18,14 @@ const USER_SELECT = {
   username: true,
   fullName: true,
   emailVerifiedAt: true,
+  status: true,
   createdAt: true,
   updatedAt: true,
   role: { select: { key: true, name: true } },
 } as const;
+
+/** Mọi truy vấn "user đang hoạt động" phải đi qua điều kiện này — xem `delete()`. */
+const NOT_DELETED = { deletedAt: null } as const;
 
 type UserRow = Prisma.UserGetPayload<{ select: typeof USER_SELECT }>;
 
@@ -42,6 +47,7 @@ export type PublicUser = {
   /** Tên hiển thị của vai trò, ví dụ `"Quản trị viên"`. */
   roleName: string;
   emailVerifiedAt: Date | null;
+  status: UserStatus;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -107,12 +113,42 @@ export class UserService {
     }
   }
 
+  /**
+   * Tạo user từ hồ sơ OAuth — email coi như đã xác thực (provider đảm bảo),
+   * không có mật khẩu, luôn gán vai trò USER mặc định.
+   *
+   * Tách riêng khỏi `create()` thay vì thêm tham số tuỳ chọn: `create()` phục
+   * vụ input công khai (đăng ký, admin tạo user) và KHÔNG được để bên gọi tự
+   * set `emailVerifiedAt` — làm vậy là mở đường giả mạo email đã xác thực.
+   */
+  async createOAuthUser(input: { email: string; fullName: string | null }): Promise<PublicUser> {
+    const roleId = await this.resolveRoleId(SYSTEM_ROLES.USER);
+
+    try {
+      const row = await prisma.user.create({
+        data: {
+          email: normalizeEmail(input.email),
+          password: null,
+          fullName: input.fullName,
+          roleId,
+          emailVerifiedAt: new Date(),
+        },
+        select: USER_SELECT,
+      });
+
+      return toPublicUser(row);
+    } catch (error) {
+      if (isPrismaError(error, "P2002")) throw duplicateFieldError(error, input);
+      throw error;
+    }
+  }
+
   async update(id: string, input: UpdateUserInput): Promise<PublicUser> {
     const roleId = input.roleKey ? await this.resolveRoleId(input.roleKey) : undefined;
 
     try {
       const row = await prisma.user.update({
-        where: { id },
+        where: { id, ...NOT_DELETED },
         data: {
           // `undefined` nghĩa là không đụng tới, `null` nghĩa là xoá giá trị.
           // Phân biệt được hai cái đó là lý do schema dùng `.nullish()`.
@@ -131,10 +167,50 @@ export class UserService {
     }
   }
 
+  /**
+   * Khoá/mở khoá tài khoản — hành động quản trị, khác hẳn `lockedUntil` (tự
+   * động, tạm thời, do sai mật khẩu liên tiếp). Xem enum `UserStatus`.
+   *
+   * @param actorId Cùng luật với `delete()`: không tự khoá chính mình. Một
+   * admin tự BANNED chính mình mà không còn admin nào khác thì không ai mở
+   * khoá lại được.
+   */
+  async setStatus(id: string, status: UserStatus, actorId: string): Promise<PublicUser> {
+    if (actorId === id) throw new SelfStatusChangeError();
+
+    try {
+      const row = await prisma.user.update({
+        where: { id, ...NOT_DELETED },
+        data: { status },
+        select: USER_SELECT,
+      });
+      return toPublicUser(row);
+    } catch (error) {
+      if (isPrismaError(error, "P2025")) throw new UserNotFoundError(id);
+      throw error;
+    }
+  }
+
+  /** Mở khoá sớm thay vì đợi `lockedUntil` tự hết hạn — hành động quản trị. */
+  async unlock(id: string): Promise<PublicUser> {
+    try {
+      const row = await prisma.user.update({
+        where: { id, ...NOT_DELETED },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+        select: USER_SELECT,
+      });
+      return toPublicUser(row);
+    } catch (error) {
+      if (isPrismaError(error, "P2025")) throw new UserNotFoundError(id);
+      throw error;
+    }
+  }
+
   async list(options: { skip?: number; take?: number } = {}): Promise<PublicUser[]> {
     const take = Math.min(options.take ?? 50, MAX_PAGE_SIZE);
 
     const rows = await prisma.user.findMany({
+      where: NOT_DELETED,
       select: USER_SELECT,
       orderBy: { createdAt: "desc" },
       skip: options.skip ?? 0,
@@ -145,25 +221,25 @@ export class UserService {
   }
 
   async count(): Promise<number> {
-    return prisma.user.count();
+    return prisma.user.count({ where: NOT_DELETED });
   }
 
   async findById(id: string): Promise<PublicUser | null> {
-    const row = await prisma.user.findUnique({ where: { id }, select: USER_SELECT });
+    const row = await prisma.user.findFirst({ where: { id, ...NOT_DELETED }, select: USER_SELECT });
     return row ? toPublicUser(row) : null;
   }
 
   async findByEmail(email: string): Promise<PublicUser | null> {
-    const row = await prisma.user.findUnique({
-      where: { email: normalizeEmail(email) },
+    const row = await prisma.user.findFirst({
+      where: { email: normalizeEmail(email), ...NOT_DELETED },
       select: USER_SELECT,
     });
     return row ? toPublicUser(row) : null;
   }
 
   async findByUsername(username: string): Promise<PublicUser | null> {
-    const row = await prisma.user.findUnique({
-      where: { username: username.trim().toLowerCase() },
+    const row = await prisma.user.findFirst({
+      where: { username: username.trim().toLowerCase(), ...NOT_DELETED },
       select: USER_SELECT,
     });
     return row ? toPublicUser(row) : null;
@@ -177,6 +253,12 @@ export class UserService {
    * mình" là luật nghiệp vụ, nên nó phải sống ở đây thay vì được chép lại ở
    * từng cửa vào. Bắt buộc truyền thì TypeScript ép mọi nơi gọi phải nói rõ
    * ai đang thao tác, và không thể vô tình bỏ sót luật.
+   *
+   * XOÁ MỀM: chỉ set `deletedAt` — không có `onDelete: Cascade` nào chạy, nên
+   * refresh token phải tự thu hồi ở đây. Email đổi thành giá trị vô hại kèm id
+   * để giải phóng cho người khác (hoặc chính chủ) đăng ký lại — email vẫn là
+   * cột NOT NULL + unique nên không thể để trống. Username (nullable) thì chỉ
+   * cần null hoá, Postgres cho phép nhiều NULL trên cột unique.
    */
   async delete(id: string, actorId: string | null): Promise<PublicUser> {
     if (actorId !== null && actorId === id) {
@@ -184,7 +266,18 @@ export class UserService {
     }
 
     try {
-      const row = await prisma.user.delete({ where: { id }, select: USER_SELECT });
+      const row = await prisma.user.update({
+        where: { id, ...NOT_DELETED },
+        data: {
+          deletedAt: new Date(),
+          email: `deleted_${id}@deleted.invalid`,
+          username: null,
+        },
+        select: USER_SELECT,
+      });
+
+      await tokenService.revokeAllForUser(id);
+
       return toPublicUser(row);
     } catch (error) {
       if (isPrismaError(error, "P2025")) {
@@ -260,6 +353,13 @@ export class SelfDeletionError extends Error {
   constructor() {
     super("Bạn không thể tự xoá tài khoản đang đăng nhập");
     this.name = "SelfDeletionError";
+  }
+}
+
+export class SelfStatusChangeError extends Error {
+  constructor() {
+    super("Bạn không thể tự khoá/mở khoá tài khoản đang đăng nhập");
+    this.name = "SelfStatusChangeError";
   }
 }
 

@@ -8,12 +8,11 @@ const initialState: AuthFormState = {};
 
 const FIELDS: Field[] = [
   {
-    name: "email",
-    label: "Email",
-    type: "email",
+    name: "identifier",
+    label: "Email hoặc tên đăng nhập",
     placeholder: "you@example.com",
     required: true,
-    autoComplete: "email",
+    autoComplete: "username",
   },
   {
     name: "password",

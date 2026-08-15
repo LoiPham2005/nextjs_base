@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logger } from "@/lib/logger";
-import { InvalidCredentialsError, InvalidVerificationTokenError } from "@/services/auth.service";
+import {
+  AccountBannedError,
+  AccountLockedError,
+  InvalidCredentialsError,
+  InvalidVerificationTokenError,
+} from "@/services/auth.service";
 import { RefreshTokenReuseError } from "@/services/token.service";
 import {
   RoleNotFoundError,
@@ -29,6 +34,8 @@ export type ApiErrorCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "RATE_LIMITED"
+  | "ACCOUNT_BANNED"
+  | "ACCOUNT_LOCKED"
   | "INTERNAL_ERROR";
 
 export class ApiError extends Error {
@@ -59,6 +66,13 @@ export const apiErrors = {
 
   rateLimited: (retryAfterSeconds: number) =>
     new ApiError(429, "RATE_LIMITED", `Quá nhiều yêu cầu. Thử lại sau ${retryAfterSeconds} giây.`),
+
+  accountBanned: (message: string) => new ApiError(403, "ACCOUNT_BANNED", message),
+
+  // 423 (Locked) chứ không phải 401/429: đây không phải sai thông tin đăng
+  // nhập (401) hay dồn dập request (429) — mật khẩu ĐÚNG nhưng tài khoản đang
+  // tạm khoá do trước đó sai quá nhiều lần.
+  accountLocked: (message: string) => new ApiError(423, "ACCOUNT_LOCKED", message),
 
   validation: (fields: Record<string, string[]>) =>
     new ApiError(422, "VALIDATION_ERROR", "Dữ liệu gửi lên không hợp lệ", fields),
@@ -112,6 +126,14 @@ export function handleApiError(error: unknown, context?: Record<string, unknown>
 
   if (error instanceof InvalidCredentialsError) {
     return handleApiError(new ApiError(401, "UNAUTHENTICATED", error.message));
+  }
+
+  if (error instanceof AccountBannedError) {
+    return handleApiError(apiErrors.accountBanned(error.message));
+  }
+
+  if (error instanceof AccountLockedError) {
+    return handleApiError(apiErrors.accountLocked(error.message));
   }
 
   // 400 chứ không phải 401: người dùng chưa từng đăng nhập trong luồng này,

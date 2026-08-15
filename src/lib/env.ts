@@ -81,6 +81,36 @@ const envSchema = z.object({
   ),
 
   NEXT_PUBLIC_APP_URL: emptyAsUndefined(z.url().optional()),
+
+  /**
+   * Chống brute-force theo TÀI KHOẢN, bổ sung cho rate-limit theo IP
+   * (`src/lib/rate-limit.ts`). Rate-limit theo IP chặn một IP dò nhiều tài
+   * khoản; cặp giá trị này chặn nhiều IP cùng dò một tài khoản.
+   */
+  LOGIN_MAX_FAILED_ATTEMPTS: z.coerce.number().int().positive().max(20).default(5),
+  LOGIN_LOCKOUT_MINUTES: z.coerce.number().int().positive().max(1440).default(15),
+
+  // --- OAuth / đăng nhập mạng xã hội --------------------------------------
+  // Mỗi provider độc lập — thiếu cặp CLIENT_ID/SECRET của provider nào thì
+  // route của provider đó tự trả lỗi "chưa cấu hình", không làm sập app.
+  GOOGLE_CLIENT_ID: emptyAsUndefined(z.string().min(1).optional()),
+  GOOGLE_CLIENT_SECRET: emptyAsUndefined(z.string().min(1).optional()),
+
+  GITHUB_CLIENT_ID: emptyAsUndefined(z.string().min(1).optional()),
+  GITHUB_CLIENT_SECRET: emptyAsUndefined(z.string().min(1).optional()),
+
+  FACEBOOK_CLIENT_ID: emptyAsUndefined(z.string().min(1).optional()),
+  FACEBOOK_CLIENT_SECRET: emptyAsUndefined(z.string().min(1).optional()),
+
+  /**
+   * Apple không dùng client secret tĩnh: secret là một JWT tự ký bằng private
+   * key (.p8) của Apple, hết hạn tối đa 6 tháng. Bốn biến dưới đây là nguyên
+   * liệu để tự mint JWT đó lúc chạy — xem `src/lib/oauth/apple-client-secret.ts`.
+   */
+  APPLE_CLIENT_ID: emptyAsUndefined(z.string().min(1).optional()),
+  APPLE_TEAM_ID: emptyAsUndefined(z.string().min(1).optional()),
+  APPLE_KEY_ID: emptyAsUndefined(z.string().min(1).optional()),
+  APPLE_PRIVATE_KEY: emptyAsUndefined(z.string().min(1).optional()),
 });
 
 export type Env = z.infer<typeof envSchema>;
