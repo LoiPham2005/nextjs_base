@@ -43,6 +43,27 @@ CDN, VPS chết là mất file.
 **Chọn: Cloudflare R2**, tách hoàn toàn khỏi DB, dù DB đặt ở Neon/Supabase/tự
 host nào cũng dùng chung được.
 
+### Object storage trong nước (Việt Nam)
+
+| Nhà cung cấp | Giá storage | Ghi chú |
+|---|---|---|
+| **vHost** | ~480đ/GB/tháng (≈ $0.019/GB) | Gần bằng giá R2, kèm **miễn phí 1TB băng thông** — quá 1TB thì cần hỏi thêm |
+| **VNDATA** | Từ ~500đ/GB/tháng (≈ $0.02/GB) | S3-compatible |
+| **FPT S3 Storage** | ~1.000đ/GB/tháng cho gói lưu trữ lạnh (≈ $0.04/GB) | Đắt hơn R2 ~2.7 lần, hướng doanh nghiệp |
+| **Vietnix S3, PA Vietnam** | Chưa có giá công khai rõ ràng | S3-compatible, cần liên hệ trực tiếp |
+
+Điểm khác biệt so với R2: các hãng trong nước có server đặt tại Việt Nam nên
+**độ trễ thấp hơn khi phục vụ chính người dùng Việt Nam** trực tiếp từ origin
+(không qua cache). Nhưng R2 dùng mạng CDN của Cloudflare — vốn cũng có điểm
+edge tại Việt Nam — nên với ảnh/video được cache, tốc độ thực tế cho người
+dùng cuối thường không chênh lệch nhiều. Egress $0 của R2 vẫn khó hãng nội địa
+nào địch lại được ở dung lượng lớn, trừ vHost (miễn phí 1TB — cần tính xem có
+đủ hay không cho quy mô dự án).
+
+Nguồn: [Vietnix S3 Object Storage](https://vietnix.vn/s3-object-storage/),
+[vHost Object Storage](https://vhost.vn/cloud/object-storage/),
+[FPT S3 Storage](https://cloudfpt.com.vn/dich-vu/fpt-s3-storage/)
+
 ## 3. Server (chạy app Next.js)
 
 | | Giá vào (2 vCPU/2-4GB) | Bandwidth kèm | Điểm mạnh |
@@ -58,6 +79,29 @@ tranh, phủ sóng châu Á tốt hơn).
 
 Chỉ chọn DigitalOcean nếu muốn gộp server + database managed + object storage
 vào đúng 1 hãng, 1 hoá đơn cho dễ quản lý — đổi lại trả nhiều hơn hẳn.
+
+### VPS trong nước (Việt Nam)
+
+Giá trị của nhóm này **không phải rẻ hơn Hetzner** — mà là **độ trễ thấp** (ping
+dưới 10ms từ các thành phố lớn, so với Hetzner Singapore hay Hetzner EU) và
+tuân thủ quy định lưu trữ dữ liệu trong nước nếu ngành nghề yêu cầu (tài
+chính, dữ liệu cá nhân theo Nghị định 13).
+
+| Nhà cung cấp | Đặc điểm | Hợp với |
+|---|---|---|
+| **Viettel IDC** | Datacenter chuẩn Tier III, ổn định nhất trong nhóm | Hệ thống cần độ tin cậy cao (tài chính, tổ chức lớn) |
+| **FPT Cloud** | 1 trong "4 trụ cột" hạ tầng cloud nội địa (cùng Viettel, VNG, CMC) | Doanh nghiệp/ngân hàng — giá cao hơn mặt bằng chung, không hợp startup nhỏ |
+| **VNG Cloud / CMC Cloud** | Cũng thuộc nhóm "4 trụ cột", tương tự FPT Cloud | Doanh nghiệp vừa/lớn |
+| **Vietnix** | Thương hiệu quen thuộc, giá vừa phải | Startup/dự án vừa, cân bằng giá và độ tin cậy |
+| **AZDIGI / TinoHost** | Rẻ nhất trong nhóm, từ ~43.000-55.000đ/tháng | Dự án nhỏ, ngân sách hạn chế, chấp nhận hỗ trợ cơ bản hơn |
+
+**Khi nào chọn VPS Việt Nam thay vì Hetzner**: nếu đo thử ping từ Hetzner
+Singapore về vẫn cao, hoặc dự án thuộc ngành bắt buộc lưu dữ liệu người dùng
+Việt Nam trong nước. Dự án thử nghiệm/MVP thông thường thì Hetzner vẫn rẻ hơn
+đáng kể và đủ nhanh với đa số người dùng.
+
+Nguồn: [TND — so sánh VPS Việt Nam 2026](https://www.tnd.vn/top-vps-viet-nam-gia-re-2026-so-sanh-7-nha-cung-cap-12925/),
+[AZDIGI Blog](https://azdigi.com/blog/kien-thuc-vps/top-nha-cung-cap-vps-viet-nam)
 
 ## Tổng kết: bộ hạ tầng đề xuất
 
