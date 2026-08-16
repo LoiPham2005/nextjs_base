@@ -66,47 +66,51 @@ Nguồn: [Vietnix S3 Object Storage](https://vietnix.vn/s3-object-storage/),
 
 ## 3. Server (chạy app Next.js)
 
-| | Giá vào (2 vCPU/2-4GB) | Bandwidth kèm | Điểm mạnh |
+⚠️ Bảng dưới đã sửa lại theo **giá thật kiểm tra trực tiếp trên trang/giỏ hàng
+của từng hãng** (trước đó có bản nháp dùng số liệu tổng hợp từ tìm kiếm, bị
+sai vì gói rẻ nhất đang hết hàng / không phải giá vào cửa thật).
+
+| | Giá thật (2 vCPU/2GB) | Bandwidth kèm | Ghi chú |
 |---|---|---|---|
-| **Hetzner** | **$4.56/tháng** | **20 TB/tháng** | Rẻ hơn 3-5 lần, giữ tỉ lệ đó xuyên suốt mọi cấu hình (không chỉ gói rẻ nhất) |
-| DigitalOcean | ~$24/tháng | 2TB, sau đó $0.01/GB | Hệ sinh thái đầy đủ (Managed DB, Spaces, App Platform) cùng 1 dashboard, nhiều tutorial hơn |
-| Vultr | Cạnh tranh sát Hetzner | Ít hơn Hetzner | Phủ sóng địa lý rộng hơn ở châu Á |
+| **Hetzner** (Regular Performance) | **€11.99/tháng** (~330.000đ) — gói rẻ hơn €5.99 đang **hết hàng** | Chỉ **0.5TB** kèm sẵn, thêm €1/TB (rất rẻ theo GB nhưng phần free nhỏ) | Giá kiểm tra trực tiếp trên hetzner.com/cloud, không phải €5.99 như tìm kiếm ban đầu |
+| **Vietnix** (VPS SSD 1) | **~178.000đ/tháng** (12 tháng, chưa VAT) / ~196.000đ có VAT | Không giới hạn dung lượng, nhưng **tốc độ**: 200Mbps trong nước, chỉ **10Mbps outbound quốc tế** | Giá lấy trực tiếp từ giỏ hàng thật portal.vietnix.vn |
+| DigitalOcean | ~$24/tháng (~610.000đ) | 2TB, sau đó $0.01/GB | Hệ sinh thái đầy đủ (Managed DB, Spaces, App Platform) cùng 1 dashboard |
 
-**Chọn: Hetzner** — rẻ hơn hẳn ở mọi quy mô, 20TB bandwidth miễn phí đủ dùng
-lâu dài. Kiểm tra độ trễ (ping) từ Việt Nam tới region Singapore của Hetzner
-trước khi cam kết; nếu độ trễ không ổn thì chuyển sang Vultr (giá vẫn cạnh
-tranh, phủ sóng châu Á tốt hơn).
+**Kết luận đã sửa: Vietnix rẻ hơn Hetzner ~1.7-2 lần** ở giá thật hiện tại
+(178.000đ so với ~330.000đ), lại còn nhỉnh hơn về cấu hình (2 vCPU so với 1
+vCPU ở mức giá rẻ nhất Hetzner). Đây là điều ngược lại với khuyến nghị ban đầu
+của tôi — bài học: **luôn kiểm tra giá thật trên trang/giỏ hàng trước khi
+quyết, đừng tin số liệu tổng hợp từ tìm kiếm chung chung.**
 
-Chỉ chọn DigitalOcean nếu muốn gộp server + database managed + object storage
-vào đúng 1 hãng, 1 hoá đơn cho dễ quản lý — đổi lại trả nhiều hơn hẳn.
+**Lưu ý riêng cho Vietnix**: outbound quốc tế chỉ 10Mbps — nếu server cần gọi
+nhiều API nước ngoài (Stripe, OpenAI, Google...) hoặc phục vụ user ngoài Việt
+Nam, tốc độ này có thể là điểm nghẽn. Nếu vậy nên hỏi thẳng Vietnix về gói có
+outbound quốc tế cao hơn, hoặc cân nhắc Hetzner dù đắt hơn.
 
-### VPS trong nước (Việt Nam)
+### VPS trong nước khác (Việt Nam)
 
-Giá trị của nhóm này **không phải rẻ hơn Hetzner** — mà là **độ trễ thấp** (ping
-dưới 10ms từ các thành phố lớn, so với Hetzner Singapore hay Hetzner EU) và
-tuân thủ quy định lưu trữ dữ liệu trong nước nếu ngành nghề yêu cầu (tài
-chính, dữ liệu cá nhân theo Nghị định 13).
+Ngoài Vietnix (đã kiểm chứng giá thật ở trên), một số hãng khác cùng nhóm:
 
 | Nhà cung cấp | Đặc điểm | Hợp với |
 |---|---|---|
 | **Viettel IDC** | Datacenter chuẩn Tier III, ổn định nhất trong nhóm | Hệ thống cần độ tin cậy cao (tài chính, tổ chức lớn) |
 | **FPT Cloud** | 1 trong "4 trụ cột" hạ tầng cloud nội địa (cùng Viettel, VNG, CMC) | Doanh nghiệp/ngân hàng — giá cao hơn mặt bằng chung, không hợp startup nhỏ |
 | **VNG Cloud / CMC Cloud** | Cũng thuộc nhóm "4 trụ cột", tương tự FPT Cloud | Doanh nghiệp vừa/lớn |
-| **Vietnix** | Thương hiệu quen thuộc, giá vừa phải | Startup/dự án vừa, cân bằng giá và độ tin cậy |
 | **AZDIGI / TinoHost** | Rẻ nhất trong nhóm, từ ~43.000-55.000đ/tháng | Dự án nhỏ, ngân sách hạn chế, chấp nhận hỗ trợ cơ bản hơn |
 
-**Khi nào chọn VPS Việt Nam thay vì Hetzner**: nếu đo thử ping từ Hetzner
-Singapore về vẫn cao, hoặc dự án thuộc ngành bắt buộc lưu dữ liệu người dùng
-Việt Nam trong nước. Dự án thử nghiệm/MVP thông thường thì Hetzner vẫn rẻ hơn
-đáng kể và đủ nhanh với đa số người dùng.
+⚠️ Giá các hãng này (trừ Vietnix) **chưa được kiểm chứng trực tiếp** như
+Hetzner/Vietnix ở trên — chỉ mang tính tham khảo, nên tự vào giỏ hàng kiểm tra
+trước khi quyết, đúng như bài học rút ra ở trên.
 
 Nguồn: [TND — so sánh VPS Việt Nam 2026](https://www.tnd.vn/top-vps-viet-nam-gia-re-2026-so-sanh-7-nha-cung-cap-12925/),
-[AZDIGI Blog](https://azdigi.com/blog/kien-thuc-vps/top-nha-cung-cap-vps-viet-nam)
+[AZDIGI Blog](https://azdigi.com/blog/kien-thuc-vps/top-nha-cung-cap-vps-viet-nam),
+giá Hetzner/Vietnix lấy trực tiếp từ hetzner.com/cloud và portal.vietnix.vn (chụp màn hình thực tế)
 
 ## Tổng kết: bộ hạ tầng đề xuất
 
 ```
-Server:   Hetzner (VPS chạy Next.js qua Docker Compose / scripts/deploy-vps.sh)
+Server:   Vietnix VPS SSD 1 (rẻ hơn Hetzner ~2 lần ở giá thật, xem lưu ý outbound
+          quốc tế 10Mbps) — chạy Next.js qua Docker Compose / scripts/deploy-vps.sh
 Database: Neon (free lúc thử nghiệm) → thêm backup hoặc chuyển Supabase Pro
           khi dự án có khách thật
 Storage:  Cloudflare R2 (ảnh/video, tách riêng khỏi DB ngay từ đầu)
