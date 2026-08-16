@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { SiteHeader } from "@/components/site-header";
+import { Header } from "@/components/layout/header";
+import { Footer } from "@/components/layout/footer";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -20,9 +21,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="vi" suppressHydrationWarning>
-      <body>
-        <SiteHeader />
-        {children}
+      <body className="flex min-h-screen flex-col justify-between">
+        <Header />
+        <div className="flex-1">{children}</div>
+        <Footer />
       </body>
     </html>
   );

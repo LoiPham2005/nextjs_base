@@ -1,29 +1,10 @@
-'use client';
-
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { getCurrentUser } from '@/lib/auth';
 import { Logo } from '@/components/common/logo';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import type { NavItem } from '@/types';
 
-interface HeaderProps {
-  navItems?: NavItem[];
-  user?: {
-    name?: string | null;
-    email?: string | null;
-    image?: string | null;
-  } | null;
-}
-
-export function Header({
-  navItems = [
-    { title: 'Trang chủ', href: '/' },
-    { title: 'Quản lý Users', href: '/users' },
-  ],
-  user,
-}: HeaderProps) {
-  const pathname = usePathname();
+export async function Header() {
+  const user = await getCurrentUser();
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-gray-200 bg-white/80 backdrop-blur-md dark:border-gray-800 dark:bg-gray-950/80">
@@ -31,23 +12,18 @@ export function Header({
         <div className="flex items-center gap-8">
           <Logo />
           <nav className="hidden md:flex items-center gap-6">
-            {navItems.map((item) => {
-              const active = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    'text-sm font-medium transition-colors',
-                    active
-                      ? 'text-blue-600 dark:text-blue-400 font-semibold'
-                      : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white',
-                  )}
-                >
-                  {item.title}
-                </Link>
-              );
-            })}
+            <Link
+              href="/"
+              className="text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white transition-colors"
+            >
+              Trang chủ
+            </Link>
+            <Link
+              href="/users"
+              className="text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white transition-colors"
+            >
+              Quản lý Users
+            </Link>
           </nav>
         </div>
 
@@ -55,7 +31,7 @@ export function Header({
           {user ? (
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                {user.name || user.email}
+                {user.fullName || user.email}
               </span>
               <form action="/api/auth/logout" method="POST">
                 <Button size="sm" variant="outline" type="submit">
