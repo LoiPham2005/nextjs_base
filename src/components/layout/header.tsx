@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
-import { Logo } from "@/components/common/logo";
+import { Logo } from "@/components/layout/logo";
 import { Button } from "@/components/ui/button";
 
 export async function Header() {
