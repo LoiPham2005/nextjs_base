@@ -3,21 +3,21 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const badgeVariants = cva(
-  'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors',
+  'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 select-none',
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-primary/10 text-primary',
-        secondary: 'border-transparent bg-secondary text-secondary-foreground',
-        outline: 'text-foreground',
-        success: 'border-transparent bg-success/10 text-success',
-        warning: 'border-transparent bg-warning/15 text-amber-700 dark:text-amber-300',
-        destructive: 'border-transparent bg-destructive/10 text-destructive',
-        accent: 'border-transparent bg-accent/15 text-accent',
-        muted: 'border-transparent bg-muted text-muted-foreground',
+        default: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+        secondary: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
+        success: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+        destructive: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+        warning: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
+        outline: 'border border-gray-300 text-gray-800 dark:border-gray-700 dark:text-gray-300',
       },
     },
-    defaultVariants: { variant: 'default' },
+    defaultVariants: {
+      variant: 'default',
+    },
   },
 );
 
@@ -25,6 +25,8 @@ export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof badgeVariants> {}
 
-export function Badge({ className, variant, ...props }: BadgeProps) {
+function Badge({ className, variant, ...props }: BadgeProps) {
   return <div className={cn(badgeVariants({ variant }), className)} {...props} />;
 }
+
+export { Badge, badgeVariants };
