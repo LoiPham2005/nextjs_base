@@ -91,10 +91,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+      # Không cache pnpm ở đây: job này không chạy `pnpm install`, nên store
+      # của pnpm không tồn tại — `cache: pnpm` sẽ làm bước "Post Run" thất bại
+      # vì "path does not exist", kéo cả job đỏ dù `pnpm audit` đã chạy đúng.
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-          cache: pnpm
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level high
 
