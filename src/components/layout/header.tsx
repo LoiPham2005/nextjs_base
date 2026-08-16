@@ -1,7 +1,7 @@
-import Link from 'next/link';
-import { getCurrentUser } from '@/lib/auth';
-import { Logo } from '@/components/common/logo';
-import { Button } from '@/components/ui/button';
+import Link from "next/link";
+import { getCurrentUser } from "@/lib/auth";
+import { Logo } from "@/components/common/logo";
+import { Button } from "@/components/ui/button";
 
 export async function Header() {
   const user = await getCurrentUser();

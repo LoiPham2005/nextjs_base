@@ -1,10 +1,10 @@
-import Link from 'next/link';
-import { Layers } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import Link from "next/link";
+import { Layers } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface LogoProps {
   className?: string;
-  size?: 'sm' | 'md' | 'lg';
+  size?: "sm" | "md" | "lg";
   showText?: boolean;
   title?: string;
   href?: string;
@@ -12,29 +12,29 @@ interface LogoProps {
 
 export function Logo({
   className,
-  size = 'md',
+  size = "md",
   showText = true,
-  title = 'AppBase',
-  href = '/',
+  title = "AppBase",
+  href = "/",
 }: LogoProps) {
   const sizes = {
-    sm: { icon: 'h-4 w-4', box: 'p-1.5 rounded-lg', text: 'text-base font-bold' },
-    md: { icon: 'h-5 w-5', box: 'p-2 rounded-xl', text: 'text-lg font-bold' },
-    lg: { icon: 'h-6 w-6', box: 'p-2.5 rounded-xl', text: 'text-xl font-extrabold' },
+    sm: { icon: "h-4 w-4", box: "p-1.5 rounded-lg", text: "text-base font-bold" },
+    md: { icon: "h-5 w-5", box: "p-2 rounded-xl", text: "text-lg font-bold" },
+    lg: { icon: "h-6 w-6", box: "p-2.5 rounded-xl", text: "text-xl font-extrabold" },
   };
 
   return (
-    <Link href={href} className={cn('flex items-center gap-2.5 group select-none', className)}>
+    <Link href={href} className={cn("flex items-center gap-2.5 group select-none", className)}>
       <div
         className={cn(
-          'flex items-center justify-center bg-blue-600 text-white shadow-md shadow-blue-500/20 transition-transform group-hover:scale-105',
+          "flex items-center justify-center bg-blue-600 text-white shadow-md shadow-blue-500/20 transition-transform group-hover:scale-105",
           sizes[size].box,
         )}
       >
         <Layers className={sizes[size].icon} />
       </div>
       {showText && (
-        <span className={cn('tracking-tight text-gray-900 dark:text-white', sizes[size].text)}>
+        <span className={cn("tracking-tight text-gray-900 dark:text-white", sizes[size].text)}>
           {title}
         </span>
       )}

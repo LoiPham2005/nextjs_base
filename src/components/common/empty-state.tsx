@@ -1,7 +1,7 @@
-import { cn } from '@/lib/utils';
-import type { LucideIcon } from 'lucide-react';
-import { Inbox } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { cn } from "@/lib/utils";
+import type { LucideIcon } from "lucide-react";
+import { Inbox } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface EmptyStateProps {
   icon?: LucideIcon;
@@ -21,7 +21,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        'flex flex-col items-center justify-center p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50',
+        "flex flex-col items-center justify-center p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50",
         className,
       )}
     >

@@ -4,15 +4,15 @@
  */
 
 export type ApiErrorCode =
-  | 'VALIDATION_ERROR'
-  | 'UNAUTHENTICATED'
-  | 'FORBIDDEN'
-  | 'NOT_FOUND'
-  | 'CONFLICT'
-  | 'RATE_LIMITED'
-  | 'ACCOUNT_BANNED'
-  | 'ACCOUNT_LOCKED'
-  | 'INTERNAL_ERROR';
+  | "VALIDATION_ERROR"
+  | "UNAUTHENTICATED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "CONFLICT"
+  | "RATE_LIMITED"
+  | "ACCOUNT_BANNED"
+  | "ACCOUNT_LOCKED"
+  | "INTERNAL_ERROR";
 
 export interface ApiErrorDetail {
   code: ApiErrorCode | string;
@@ -40,7 +40,7 @@ export interface PaginationParams {
   limit?: number;
   search?: string;
   sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  sortOrder?: "asc" | "desc";
 }
 
 export interface PaginatedResult<T> {

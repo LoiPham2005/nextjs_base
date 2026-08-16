@@ -1,5 +1,5 @@
-import type { LucideIcon } from 'lucide-react';
-import type { ComponentType } from 'react';
+import type { LucideIcon } from "lucide-react";
+import type { ComponentType } from "react";
 
 /**
  * Kiểu dữ liệu cho Menu, Sidebar, Header items

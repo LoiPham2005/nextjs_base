@@ -8,13 +8,13 @@
  */
 export function formatCurrency(
   amount: number,
-  currency: 'VND' | 'USD' = 'VND',
-  locale = 'vi-VN',
+  currency: "VND" | "USD" = "VND",
+  locale = "vi-VN",
 ): string {
   return new Intl.NumberFormat(locale, {
-    style: 'currency',
+    style: "currency",
     currency,
-    maximumFractionDigits: currency === 'VND' ? 0 : 2,
+    maximumFractionDigits: currency === "VND" ? 0 : 2,
   }).format(amount);
 }
 
@@ -25,14 +25,14 @@ export function formatCurrency(
 export function formatDate(
   date: Date | string | number,
   options: Intl.DateTimeFormatOptions = {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
   },
-  locale = 'vi-VN',
+  locale = "vi-VN",
 ): string {
-  const d = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date;
-  if (isNaN(d.getTime())) return '';
+  const d = typeof date === "string" || typeof date === "number" ? new Date(date) : date;
+  if (isNaN(d.getTime())) return "";
   return new Intl.DateTimeFormat(locale, options).format(d);
 }
 
@@ -42,11 +42,11 @@ export function formatDate(
  */
 export function formatDateTime(date: Date | string | number): string {
   return formatDate(date, {
-    hour: '2-digit',
-    minute: '2-digit',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
   });
 }
 
@@ -55,7 +55,7 @@ export function formatDateTime(date: Date | string | number): string {
  * @example formatPhoneNumber("0912345678") => "0912 345 678"
  */
 export function formatPhoneNumber(phone: string): string {
-  const cleaned = ('' + phone).replace(/\D/g, '');
+  const cleaned = ("" + phone).replace(/\D/g, "");
   const match = cleaned.match(/^(\d{4})(\d{3})(\d{3})$/);
   if (match) {
     return `${match[1]} ${match[2]} ${match[3]}`;
@@ -70,11 +70,11 @@ export function formatPhoneNumber(phone: string): string {
 export function slugify(str: string): string {
   return str
     .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[đĐ]/g, 'd')
-    .replace(/([^0-9a-z-\s])/g, '')
-    .replace(/(\s+)/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d")
+    .replace(/([^0-9a-z-\s])/g, "")
+    .replace(/(\s+)/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
