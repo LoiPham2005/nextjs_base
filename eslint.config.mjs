@@ -86,16 +86,22 @@ export default tseslint.config(
     },
   },
 
-  // File config và script .mjs — chạy bằng Node, không nằm trong chương trình
-  // TypeScript nên không lint theo kiểu được.
+  // File config và script .mjs/.cjs — chạy bằng Node, không nằm trong chương
+  // trình TypeScript nên không lint theo kiểu được.
   {
-    files: ["**/*.mjs", "**/*.js"],
+    files: ["**/*.mjs", "**/*.js", "**/*.cjs"],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
       globals: {
         console: "readonly",
         process: "readonly",
         URL: "readonly",
+        // .cjs (vd ecosystem.config.cjs cho PM2) dùng CommonJS, không phải ESM.
+        module: "writable",
+        exports: "writable",
+        require: "readonly",
+        __dirname: "readonly",
+        __filename: "readonly",
       },
     },
     rules: { "no-console": "off" },
