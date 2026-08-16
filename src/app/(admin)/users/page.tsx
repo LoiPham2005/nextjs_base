@@ -14,7 +14,7 @@ export default async function UsersPage() {
   // xem `actions.ts` để biết vì sao không thể chỉ dựa vào chỗ này.
   const currentUser = await requirePermission("user:read", "/users");
 
-  const [users, total] = await Promise.all([userService.list(), userService.count()]);
+  const [{ users }, total] = await Promise.all([userService.list(), userService.count()]);
 
   return (
     <main className="container">

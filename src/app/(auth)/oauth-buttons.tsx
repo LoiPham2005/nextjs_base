@@ -22,7 +22,7 @@ export function OAuthButtons({ next }: { next?: string }) {
       {configured.map((provider) => (
         <Link
           key={provider}
-          href={`/api/auth/oauth/${provider}/start${next ? `?next=${encodeURIComponent(next)}` : ""}`}
+          href={`/api/v1/auth/oauth/${provider}/start${next ? `?next=${encodeURIComponent(next)}` : ""}`}
           className="btn btn-secondary"
           style={{ width: "100%" }}
         >

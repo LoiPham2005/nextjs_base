@@ -12,7 +12,7 @@ const adminPayload = { sub: "admin-1", email: "admin@example.com", role: "ADMIN"
 const userPayload = { sub: "user-1", email: "user@example.com", role: "USER" as const };
 
 function requestWith(headers: Record<string, string> = {}) {
-  return new Request("http://localhost/api/users", { headers });
+  return new Request("http://localhost/api/v1/users", { headers });
 }
 
 beforeEach(() => {

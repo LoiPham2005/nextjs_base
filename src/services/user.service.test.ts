@@ -154,12 +154,12 @@ describe("UserService", () => {
   });
 
   describe("list", () => {
-    it("mặc định lấy 50 bản ghi", async () => {
+    it("mặc định lấy 50 bản ghi — cộng dư 1 để biết còn trang sau", async () => {
       vi.mocked(prisma.user.findMany).mockResolvedValue([]);
 
       await service.list();
 
-      expect(vi.mocked(prisma.user.findMany).mock.calls[0]?.[0]).toMatchObject({ take: 50 });
+      expect(vi.mocked(prisma.user.findMany).mock.calls[0]?.[0]).toMatchObject({ take: 51 });
     });
 
     it("chặn trần ở 100 dù caller yêu cầu nhiều hơn", async () => {
@@ -167,7 +167,37 @@ describe("UserService", () => {
 
       await service.list({ take: 100_000 });
 
-      expect(vi.mocked(prisma.user.findMany).mock.calls[0]?.[0]).toMatchObject({ take: 100 });
+      expect(vi.mocked(prisma.user.findMany).mock.calls[0]?.[0]).toMatchObject({ take: 101 });
+    });
+
+    it("trả nextCursor khi còn dư dòng, cắt bớt dòng thừa khỏi kết quả", async () => {
+      const rows = Array.from({ length: 3 }, (_, i) => row({ id: `u-${i}` }));
+      vi.mocked(prisma.user.findMany).mockResolvedValue(rows);
+
+      const { users, nextCursor } = await service.list({ take: 2 });
+
+      expect(users).toHaveLength(2);
+      expect(nextCursor).toBe("u-1");
+    });
+
+    it("nextCursor = null khi hết dữ liệu", async () => {
+      vi.mocked(prisma.user.findMany).mockResolvedValue([row({ id: "u-0" })]);
+
+      const { users, nextCursor } = await service.list({ take: 2 });
+
+      expect(users).toHaveLength(1);
+      expect(nextCursor).toBeNull();
+    });
+
+    it("truyền cursor xuống Prisma kèm skip: 1 để bỏ qua chính dòng cursor", async () => {
+      vi.mocked(prisma.user.findMany).mockResolvedValue([]);
+
+      await service.list({ cursor: "u-5" });
+
+      expect(vi.mocked(prisma.user.findMany).mock.calls[0]?.[0]).toMatchObject({
+        cursor: { id: "u-5" },
+        skip: 1,
+      });
     });
   });
 

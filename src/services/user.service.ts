@@ -209,18 +209,37 @@ export class UserService {
     }
   }
 
-  async list(options: { skip?: number; take?: number } = {}): Promise<PublicUser[]> {
+  /**
+   * Phân trang kiểu cursor, không phải `skip`/`take` (offset).
+   *
+   * Offset càng về sau càng chậm — trang thứ N phải quét qua N×take dòng để
+   * bỏ qua, kể cả khi Postgres đã có index trên `createdAt`. Cursor tra thẳng
+   * vào vị trí bằng index, không phụ thuộc đang ở trang bao nhiêu — quan
+   * trọng cho màn hình danh sách kiểu kéo vô hạn trên mobile khi bảng lớn.
+   *
+   * Sắp theo `createdAt` rồi `id` làm tiêu chí phụ: chỉ mình `createdAt` không
+   * đảm bảo thứ tự duy nhất (2 user tạo cùng mili giây là có thật), cursor cần
+   * thứ tự tuyệt đối để không bỏ sót hoặc lặp dòng giữa các lần gọi.
+   */
+  async list(
+    options: { cursor?: string; take?: number } = {},
+  ): Promise<{ users: PublicUser[]; nextCursor: string | null }> {
     const take = Math.min(options.take ?? 50, MAX_PAGE_SIZE);
 
     const rows = await prisma.user.findMany({
       where: NOT_DELETED,
       select: USER_SELECT,
-      orderBy: { createdAt: "desc" },
-      skip: options.skip ?? 0,
-      take,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      // Lấy dư 1 dòng để biết còn trang sau không, mà không cần đếm riêng.
+      take: take + 1,
+      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
     });
 
-    return rows.map(toPublicUser);
+    const hasMore = rows.length > take;
+    const page = hasMore ? rows.slice(0, take) : rows;
+    const nextCursor = hasMore ? (page[page.length - 1]?.id ?? null) : null;
+
+    return { users: page.map(toPublicUser), nextCursor };
   }
 
   async count(): Promise<number> {

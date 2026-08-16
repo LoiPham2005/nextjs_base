@@ -45,25 +45,29 @@ nextjs_base/
 ├── src/
 │   ├── proxy.ts               # CSP + chặn route chưa đăng nhập (Next 16 gọi là Proxy)
 │   ├── app/
-│   │   ├── (auth)/            # Trang login/register + Server Action xác thực
-│   │   ├── users/             # CRUD người dùng (chỉ ADMIN)
-│   │   ├── api/               # REST API cho mobile — xem mục riêng bên dưới
-│   │   │   ├── auth/          # register, login, refresh, logout, me
-│   │   │   ├── users/         # CRUD qua JSON
-│   │   │   └── health/        # Health check có kiểm tra database
+│   │   ├── (auth)/            # Trang login/register + Server Action xác thực + nút OAuth
+│   │   ├── (admin)/users/     # CRUD người dùng (chỉ ADMIN) — route group khu quản trị
+│   │   ├── api/
+│   │   │   ├── health/        # Health check — KHÔNG versioned, đọc bởi Docker/deploy script
+│   │   │   └── v1/            # REST API cho mobile, có version — xem mục riêng bên dưới
+│   │   │       ├── auth/      # register, login, refresh, logout, me, oauth/*
+│   │   │       ├── users/     # CRUD qua JSON, kể cả status/unlock
+│   │   │       └── openapi.json/  # Đặc tả OpenAPI sinh từ Zod schema
 │   │   ├── error.tsx          # Error boundary
 │   │   ├── global-error.tsx   # Bắt lỗi xảy ra ngay trong root layout
 │   │   ├── not-found.tsx
 │   │   └── loading.tsx
-│   ├── components/            # Component dùng chung (SiteHeader)
+│   ├── components/            # layout/ (Header, Footer), common/ (Logo), ui/ (Shadcn-style)
 │   ├── lib/
 │   │   ├── env.ts             # Validate biến môi trường bằng Zod lúc khởi động
 │   │   ├── session.ts         # Ký/verify JWT — không dính cookie, dùng chung web+mobile
 │   │   ├── auth.ts            # Bản cho web: đọc cookie, requireUser/requireAdmin
 │   │   ├── api/               # Bản cho REST API: Bearer token, envelope JSON, map lỗi
+│   │   ├── oauth/             # OAuth 2.0 + PKCE tự viết (Google/Github/Facebook/Apple)
+│   │   ├── openapi/           # Đăng ký Zod schema → tài liệu OpenAPI (/api/v1/openapi.json)
 │   │   ├── prisma.ts          # Prisma Client singleton (an toàn với HMR)
-│   │   ├── crypto.ts          # bcrypt + so sánh giả chống dò qua thời gian
-│   │   ├── rate-limit.ts      # Giới hạn tần suất đăng nhập
+│   │   ├── crypto.ts          # Argon2id + so sánh giả chống dò qua thời gian
+│   │   ├── rate-limit.ts      # Giới hạn tần suất đăng nhập theo IP
 │   │   └── logger.ts          # Log JSON một dòng, tự che trường nhạy cảm
 │   ├── schemas/               # Zod schema (nguồn sự thật cho validation)
 │   └── services/              # Tầng nghiệp vụ — nơi duy nhất gọi Prisma
@@ -87,15 +91,15 @@ thẳng request tới action dành cho ADMIN được.
 
 Vì vậy quyền được kiểm ở **nhiều lớp độc lập**:
 
-| Lớp                           | Chặn được gì                         | Ở đâu                      |
-| ----------------------------- | ------------------------------------ | -------------------------- |
-| Proxy (chỉ trang, KHÔNG /api) | Người chưa đăng nhập vào trang       | `src/proxy.ts`             |
-| Trang (`requireAdmin`)        | Người đăng nhập nhưng không đủ quyền | `src/app/users/page.tsx`   |
-| **Server Action (bắt buộc)**  | Request gửi thẳng tới action         | `src/app/users/actions.ts` |
-| **Route handler (bắt buộc)**  | Mọi request tới REST API             | `src/app/api/**`           |
+| Lớp                           | Chặn được gì                         | Ở đâu                              |
+| ----------------------------- | ------------------------------------ | ---------------------------------- |
+| Proxy (chỉ trang, KHÔNG /api) | Người chưa đăng nhập vào trang       | `src/proxy.ts`                     |
+| Trang (`requireAdmin`)        | Người đăng nhập nhưng không đủ quyền | `src/app/(admin)/users/page.tsx`   |
+| **Server Action (bắt buộc)**  | Request gửi thẳng tới action         | `src/app/(admin)/users/actions.ts` |
+| **Route handler (bắt buộc)**  | Mọi request tới REST API             | `src/app/api/**`                   |
 
 Thêm action mới thì **luôn** tự kiểm quyền trong action đó. Ràng buộc này được
-khoá bằng test trong `src/app/users/actions.test.ts`.
+khoá bằng test trong `src/app/(admin)/users/actions.test.ts`.
 
 ### Những điểm khác
 
@@ -219,7 +223,7 @@ null` rồi kiểm tra số dòng. Đọc-trước-ghi-sau sẽ để hai reques
 - **Đổi mật khẩu thu hồi toàn bộ refresh token.** Luồng này thường xuất phát từ
   nghi ngờ bị chiếm tài khoản; để phiên cũ sống thì việc đổi gần như vô nghĩa.
 
-`/api/auth/forgot-password` **luôn trả 200**, kể cả khi email không tồn tại và
+`/api/v1/auth/forgot-password` **luôn trả 200**, kể cả khi email không tồn tại và
 kể cả khi gửi thư thất bại. Bất kỳ khác biệt nào — mã lỗi, thời gian phản hồi —
 đều biến nó thành công cụ dò danh sách người dùng. Lỗi thật vẫn vào log.
 
@@ -426,23 +430,46 @@ mọi handler phải gọi `requireApiUser()` hoặc `requireApiAdmin()`.
 
 ### Các endpoint có sẵn
 
-| Method   | Đường dẫn                        | Quyền                 |
-| -------- | -------------------------------- | --------------------- |
-| `POST`   | `/api/auth/register`             | công khai             |
-| `POST`   | `/api/auth/login`                | công khai             |
-| `POST`   | `/api/auth/refresh`              | refresh token         |
-| `POST`   | `/api/auth/logout`               | đã đăng nhập          |
-| `GET`    | `/api/auth/me`                   | đã đăng nhập          |
-| `POST`   | `/api/auth/forgot-password`      | công khai             |
-| `POST`   | `/api/auth/reset-password`       | token trong email     |
-| `POST`   | `/api/auth/verify-email`         | token trong email     |
-| `POST`   | `/api/auth/verify-email/request` | đã đăng nhập          |
-| `POST`   | `/api/auth/change-password`      | đã đăng nhập          |
-| `GET`    | `/api/users`                     | ADMIN                 |
-| `POST`   | `/api/users`                     | ADMIN                 |
-| `GET`    | `/api/users/{id}`                | ADMIN hoặc chính mình |
-| `DELETE` | `/api/users/{id}`                | ADMIN                 |
-| `GET`    | `/api/health`                    | công khai             |
+| Method                                                                       | Đường dẫn | Quyền |
+| ---------------------------------------------------------------------------- | --------- | ----- |
+| ⚠️ Toàn bộ endpoint client (mobile) nằm dưới **`/api/v1`** — versioning thêm |
+| sớm có chủ đích, xem mục "Vì sao có `/v1`" bên dưới. Riêng `/api/health`     |
+| không versioned vì đó là healthcheck hạ tầng (Docker/deploy script đọc trực  |
+| tiếp), không phải hợp đồng dữ liệu cho client.                               |
+
+| `POST` | `/api/v1/auth/register` | công khai |
+| `POST` | `/api/v1/auth/login` | công khai |
+| `POST` | `/api/v1/auth/refresh` | refresh token |
+| `POST` | `/api/v1/auth/logout` | đã đăng nhập |
+| `GET` | `/api/v1/auth/me` | đã đăng nhập |
+| `POST` | `/api/v1/auth/forgot-password` | công khai |
+| `POST` | `/api/v1/auth/reset-password` | token trong email |
+| `POST` | `/api/v1/auth/verify-email` | token trong email |
+| `POST` | `/api/v1/auth/verify-email/request` | đã đăng nhập |
+| `POST` | `/api/v1/auth/change-password` | đã đăng nhập |
+| `GET` | `/api/v1/auth/oauth/{provider}/start` | công khai (redirect) |
+| `GET`\* | `/api/v1/auth/oauth/{provider}/callback` | công khai (redirect) |
+| `GET` | `/api/v1/users` | ADMIN |
+| `POST` | `/api/v1/users` | ADMIN |
+| `GET` | `/api/v1/users/{id}` | ADMIN hoặc chính mình |
+| `DELETE` | `/api/v1/users/{id}` | ADMIN |
+| `PATCH` | `/api/v1/users/{id}/status` | ADMIN |
+| `POST` | `/api/v1/users/{id}/unlock` | ADMIN |
+| `GET` | `/api/v1/openapi.json` | công khai |
+| `GET` | `/api/health` | công khai (unversioned)|
+
+\* Apple bắt buộc `POST` cho endpoint callback — xem `src/lib/oauth/`.
+
+**Tài liệu tương tác**: `/api/v1/openapi.json` sinh tự động từ Zod schema thật
+(`src/lib/openapi/registry.ts`) — dán URL này vào editor.swagger.io hoặc
+Postman ("Import từ link") để có docs luôn khớp code, không lệch tay.
+
+### Vì sao có `/v1`
+
+Mobile không deploy tức thời như web — app đã lên store không thể ép user
+update ngay. Đổi hợp đồng API breaking mà không versioning sẽ làm bản cũ hỏng
+ngay lập tức, không cách nào cứu. Thêm `/v1` từ đầu, trước khi có user thật,
+để việc này không bao giờ phải làm trong hoảng loạn sau này.
 
 ### Định dạng response
 
@@ -452,7 +479,8 @@ Client nên switch-case theo **`code`**, không theo `message` — message là l
 văn hiển thị cho người dùng và có thể đổi bất cứ lúc nào.
 
 `VALIDATION_ERROR` (422) · `UNAUTHENTICATED` (401) · `FORBIDDEN` (403) ·
-`NOT_FOUND` (404) · `CONFLICT` (409) · `RATE_LIMITED` (429) · `INTERNAL_ERROR` (500)
+`NOT_FOUND` (404) · `CONFLICT` (409) · `RATE_LIMITED` (429) ·
+`ACCOUNT_BANNED` (403) · `ACCOUNT_LOCKED` (423) · `INTERNAL_ERROR` (500)
 
 ### Mô hình token
 
@@ -482,7 +510,7 @@ văn hiển thị cho người dùng và có thể đổi bất cứ lúc nào.
   không phân biệt được bên nào là kẻ trộm nên đá cả hai ra là phản ứng đúng.
 
 Phía Flutter: lưu cả hai bằng `flutter_secure_storage`, gắn interceptor để khi
-gặp 401 thì gọi `/api/auth/refresh` rồi thử lại request. **Không cần CORS** vì
+gặp 401 thì gọi `/api/v1/auth/refresh` rồi thử lại request. **Không cần CORS** vì
 app native không phải trình duyệt.
 
 ### Thêm endpoint mới

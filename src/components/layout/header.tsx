@@ -33,7 +33,7 @@ export async function Header() {
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 {user.fullName || user.email}
               </span>
-              <form action="/api/auth/logout" method="POST">
+              <form action="/api/v1/auth/logout" method="POST">
                 <Button size="sm" variant="outline" type="submit">
                   Đăng xuất
                 </Button>
