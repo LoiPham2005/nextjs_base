@@ -23,7 +23,9 @@ export async function getAppleClientSecret(): Promise<string> {
   }
 
   if (!env.APPLE_TEAM_ID || !env.APPLE_KEY_ID || !env.APPLE_PRIVATE_KEY || !env.APPLE_CLIENT_ID) {
-    throw new Error("Thiếu biến môi trường APPLE_TEAM_ID/APPLE_KEY_ID/APPLE_PRIVATE_KEY/APPLE_CLIENT_ID");
+    throw new Error(
+      "Thiếu biến môi trường APPLE_TEAM_ID/APPLE_KEY_ID/APPLE_PRIVATE_KEY/APPLE_CLIENT_ID",
+    );
   }
 
   // Khoá .p8 tải từ Apple Developer thường được dán vào .env với `\n` theo

@@ -8,12 +8,12 @@ nghiệm, không phải đổi hạ tầng khi dự án nào đó thật sự ch
 
 ### So sánh
 
-| | Free tier | Giá vào | Mạnh nhất | Yếu nhất |
-|---|---|---|---|---|
-| **Neon** | 100 project, mỗi project 0.5GB + 100 compute-hours riêng, scale-to-zero tự động | $0.106/CU-hour, không phí tối thiểu | Nhiều project song song không tranh tài nguyên, rẻ khi mở rộng | Backup/restore phải tự bật, không tự động kèm sẵn |
-| **Supabase** | Chỉ 2 project, 500MB, 5GB egress | $25/tháng (Pro) | Bundle sẵn Auth+Storage+DB, backup 7 ngày tự động không cần cấu hình | Giới hạn 2 project ở free; giá compute leo nhanh khi cần nhiều RAM (Micro $10 → Medium $60) |
-| **Prisma Postgres** | "50 databases" nhưng CHUNG 1 project, chung đúng 500MB + 100k operations | $10/tháng (Starter) | Studio chạy sẵn trên web, giá/operation giảm dần theo tier | Giá storage đắt gấp 8-16 lần Neon/Supabase |
-| **Tự host (Docker/VPS)** | Không giới hạn, chỉ tốn tiền VPS | Giá VPS | Rẻ nhất, toàn quyền kiểm soát | **Không có backup tự động** — phải tự script `pg_dump` + đẩy lên object storage |
+|                          | Free tier                                                                       | Giá vào                             | Mạnh nhất                                                            | Yếu nhất                                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| **Neon**                 | 100 project, mỗi project 0.5GB + 100 compute-hours riêng, scale-to-zero tự động | $0.106/CU-hour, không phí tối thiểu | Nhiều project song song không tranh tài nguyên, rẻ khi mở rộng       | Backup/restore phải tự bật, không tự động kèm sẵn                                           |
+| **Supabase**             | Chỉ 2 project, 500MB, 5GB egress                                                | $25/tháng (Pro)                     | Bundle sẵn Auth+Storage+DB, backup 7 ngày tự động không cần cấu hình | Giới hạn 2 project ở free; giá compute leo nhanh khi cần nhiều RAM (Micro $10 → Medium $60) |
+| **Prisma Postgres**      | "50 databases" nhưng CHUNG 1 project, chung đúng 500MB + 100k operations        | $10/tháng (Starter)                 | Studio chạy sẵn trên web, giá/operation giảm dần theo tier           | Giá storage đắt gấp 8-16 lần Neon/Supabase                                                  |
+| **Tự host (Docker/VPS)** | Không giới hạn, chỉ tốn tiền VPS                                                | Giá VPS                             | Rẻ nhất, toàn quyền kiểm soát                                        | **Không có backup tự động** — phải tự script `pg_dump` + đẩy lên object storage             |
 
 ### Quyết định theo giai đoạn
 
@@ -33,24 +33,24 @@ nghiệm, không phải đổi hạ tầng khi dự án nào đó thật sự ch
 **Không bao giờ lưu file trong Postgres hay đĩa VPS** — phình database, không
 CDN, VPS chết là mất file.
 
-| | Storage | Egress | Ghi chú |
-|---|---|---|---|
-| **Cloudflare R2** | $0.015/GB | **$0** | Khuyên dùng — app nhiều ảnh (phòng, địa điểm...) bị xem lại nhiều lần, egress mới là khoản tốn tiền thật, không phải dung lượng lưu |
-| Backblaze B2 | $0.006/GB (rẻ nhất) | $0 nếu serve qua Cloudflare CDN, ngược lại $0.01/GB | Rẻ hơn R2 về lý thuyết nhưng phải tự nối thêm CDN |
-| AWS S3 / GCS | ~$0.02/GB | ~$0.09-0.12/GB | Egress đắt, tránh cho app nhiều ảnh/video |
-| Supabase Storage / Prisma Buckets | Bundled theo gói DB | Tính chung vào pool egress của DB (Supabase) / không công khai (Prisma) | Dùng chung pool egress với DB — rủi ro làm cạn quota DB nhanh hơn |
+|                                   | Storage             | Egress                                                                  | Ghi chú                                                                                                                             |
+| --------------------------------- | ------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **Cloudflare R2**                 | $0.015/GB           | **$0**                                                                  | Khuyên dùng — app nhiều ảnh (phòng, địa điểm...) bị xem lại nhiều lần, egress mới là khoản tốn tiền thật, không phải dung lượng lưu |
+| Backblaze B2                      | $0.006/GB (rẻ nhất) | $0 nếu serve qua Cloudflare CDN, ngược lại $0.01/GB                     | Rẻ hơn R2 về lý thuyết nhưng phải tự nối thêm CDN                                                                                   |
+| AWS S3 / GCS                      | ~$0.02/GB           | ~$0.09-0.12/GB                                                          | Egress đắt, tránh cho app nhiều ảnh/video                                                                                           |
+| Supabase Storage / Prisma Buckets | Bundled theo gói DB | Tính chung vào pool egress của DB (Supabase) / không công khai (Prisma) | Dùng chung pool egress với DB — rủi ro làm cạn quota DB nhanh hơn                                                                   |
 
 **Chọn: Cloudflare R2**, tách hoàn toàn khỏi DB, dù DB đặt ở Neon/Supabase/tự
 host nào cũng dùng chung được.
 
 ### Object storage trong nước (Việt Nam)
 
-| Nhà cung cấp | Giá storage | Ghi chú |
-|---|---|---|
-| **vHost** | ~480đ/GB/tháng (≈ $0.019/GB) | Gần bằng giá R2, kèm **miễn phí 1TB băng thông** — quá 1TB thì cần hỏi thêm |
-| **VNDATA** | Từ ~500đ/GB/tháng (≈ $0.02/GB) | S3-compatible |
-| **FPT S3 Storage** | ~1.000đ/GB/tháng cho gói lưu trữ lạnh (≈ $0.04/GB) | Đắt hơn R2 ~2.7 lần, hướng doanh nghiệp |
-| **Vietnix S3, PA Vietnam** | Chưa có giá công khai rõ ràng | S3-compatible, cần liên hệ trực tiếp |
+| Nhà cung cấp               | Giá storage                                        | Ghi chú                                                                     |
+| -------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------- |
+| **vHost**                  | ~480đ/GB/tháng (≈ $0.019/GB)                       | Gần bằng giá R2, kèm **miễn phí 1TB băng thông** — quá 1TB thì cần hỏi thêm |
+| **VNDATA**                 | Từ ~500đ/GB/tháng (≈ $0.02/GB)                     | S3-compatible                                                               |
+| **FPT S3 Storage**         | ~1.000đ/GB/tháng cho gói lưu trữ lạnh (≈ $0.04/GB) | Đắt hơn R2 ~2.7 lần, hướng doanh nghiệp                                     |
+| **Vietnix S3, PA Vietnam** | Chưa có giá công khai rõ ràng                      | S3-compatible, cần liên hệ trực tiếp                                        |
 
 Điểm khác biệt so với R2: các hãng trong nước có server đặt tại Việt Nam nên
 **độ trễ thấp hơn khi phục vụ chính người dùng Việt Nam** trực tiếp từ origin
@@ -70,13 +70,13 @@ Nguồn: [Vietnix S3 Object Storage](https://vietnix.vn/s3-object-storage/),
 của từng hãng** (trước đó có bản nháp dùng số liệu tổng hợp từ tìm kiếm, bị
 sai vì gói rẻ nhất đang hết hàng / không phải giá vào cửa thật).
 
-| | Giá thật (~2 vCPU/2GB) | Bandwidth kèm | Ghi chú |
-|---|---|---|---|
-| **VinaHost** (Cheap-SSD2) | **~119.213đ/tháng** (chưa VAT) — **rẻ nhất đã kiểm chứng** | 40GB SSD, 100Mbps trong nước, **chỉ 1-10Mbps quốc tế** | Giá đọc trực tiếp từ vinahost.vn/thue-vps-gia-re. Giảm thêm 5-15% nếu đóng 6-36 tháng |
-| **BKNS** (Cloud VPS-VM02) | **153.000đ/tháng** | 30GB SSD, cổng 10Gbps, **500Mbps download/200Mbps upload**, backup tự động hàng tuần miễn phí | Giá đọc trực tiếp từ bkns.vn/cloud-server/cloud-vps.html. ⚠️ Trang không ghi rõ tốc độ outbound QUỐC TẾ riêng — cần hỏi thẳng trước khi chọn |
-| **Vietnix** (VPS SSD 1) | ~178.000đ/tháng (12 tháng, chưa VAT) | Không giới hạn dung lượng, 200Mbps trong nước, chỉ **10Mbps quốc tế** | Giá lấy trực tiếp từ giỏ hàng thật portal.vietnix.vn |
-| **Hetzner** (Regular Performance) | €11.99/tháng (~330.000đ) — gói €5.99 đang hết hàng | Chỉ 0.5TB kèm, thêm €1/TB | Giá kiểm tra trực tiếp trên hetzner.com/cloud |
-| DigitalOcean | ~$24/tháng (~610.000đ) | 2TB, sau đó $0.01/GB, **tốc độ quốc tế đầy đủ, không bị giới hạn riêng** | Hệ sinh thái đầy đủ (Managed DB, Spaces, App Platform) cùng 1 dashboard |
+|                                   | Giá thật (~2 vCPU/2GB)                                     | Bandwidth kèm                                                                                 | Ghi chú                                                                                                                                      |
+| --------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **VinaHost** (Cheap-SSD2)         | **~119.213đ/tháng** (chưa VAT) — **rẻ nhất đã kiểm chứng** | 40GB SSD, 100Mbps trong nước, **chỉ 1-10Mbps quốc tế**                                        | Giá đọc trực tiếp từ vinahost.vn/thue-vps-gia-re. Giảm thêm 5-15% nếu đóng 6-36 tháng                                                        |
+| **BKNS** (Cloud VPS-VM02)         | **153.000đ/tháng**                                         | 30GB SSD, cổng 10Gbps, **500Mbps download/200Mbps upload**, backup tự động hàng tuần miễn phí | Giá đọc trực tiếp từ bkns.vn/cloud-server/cloud-vps.html. ⚠️ Trang không ghi rõ tốc độ outbound QUỐC TẾ riêng — cần hỏi thẳng trước khi chọn |
+| **Vietnix** (VPS SSD 1)           | ~178.000đ/tháng (12 tháng, chưa VAT)                       | Không giới hạn dung lượng, 200Mbps trong nước, chỉ **10Mbps quốc tế**                         | Giá lấy trực tiếp từ giỏ hàng thật portal.vietnix.vn                                                                                         |
+| **Hetzner** (Regular Performance) | €11.99/tháng (~330.000đ) — gói €5.99 đang hết hàng         | Chỉ 0.5TB kèm, thêm €1/TB                                                                     | Giá kiểm tra trực tiếp trên hetzner.com/cloud                                                                                                |
+| DigitalOcean                      | ~$24/tháng (~610.000đ)                                     | 2TB, sau đó $0.01/GB, **tốc độ quốc tế đầy đủ, không bị giới hạn riêng**                      | Hệ sinh thái đầy đủ (Managed DB, Spaces, App Platform) cùng 1 dashboard                                                                      |
 
 **Kết luận đã cập nhật: VinaHost rẻ nhất trong nhóm đã kiểm chứng thật**
 (119.213đ so với 153.000đ của BKNS và 178.000đ của Vietnix) — nhưng dính đúng
@@ -95,13 +95,13 @@ web bình thường (traffic đó là trong nước), nhưng ảnh hưởng tr�
 
 ### VPS trong nước khác (Việt Nam) — chưa kiểm chứng đầy đủ
 
-| Nhà cung cấp | Đặc điểm | Hợp với |
-|---|---|---|
-| **iNET** | ~240.000đ/tháng gói cơ bản (thường có khuyến mãi 50%, còn ~120.000đ) | Chưa xác nhận được cấu hình/tốc độ quốc tế chính xác qua trang giá — cần tự kiểm tra trên inet.vn trước khi chọn |
-| **Viettel IDC** | Datacenter chuẩn Tier III, ổn định nhất trong nhóm | Hệ thống cần độ tin cậy cao (tài chính, tổ chức lớn) |
-| **FPT Cloud** | 1 trong "4 trụ cột" hạ tầng cloud nội địa (cùng Viettel, VNG, CMC) | Doanh nghiệp/ngân hàng — giá cao hơn mặt bằng chung, không hợp startup nhỏ |
-| **VNG Cloud / CMC Cloud** | Cũng thuộc nhóm "4 trụ cột", tương tự FPT Cloud | Doanh nghiệp vừa/lớn |
-| **AZDIGI / TinoHost** | Rẻ nhất trong nhóm, từ ~43.000-55.000đ/tháng | Dự án nhỏ, ngân sách hạn chế, chấp nhận hỗ trợ cơ bản hơn |
+| Nhà cung cấp              | Đặc điểm                                                             | Hợp với                                                                                                          |
+| ------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **iNET**                  | ~240.000đ/tháng gói cơ bản (thường có khuyến mãi 50%, còn ~120.000đ) | Chưa xác nhận được cấu hình/tốc độ quốc tế chính xác qua trang giá — cần tự kiểm tra trên inet.vn trước khi chọn |
+| **Viettel IDC**           | Datacenter chuẩn Tier III, ổn định nhất trong nhóm                   | Hệ thống cần độ tin cậy cao (tài chính, tổ chức lớn)                                                             |
+| **FPT Cloud**             | 1 trong "4 trụ cột" hạ tầng cloud nội địa (cùng Viettel, VNG, CMC)   | Doanh nghiệp/ngân hàng — giá cao hơn mặt bằng chung, không hợp startup nhỏ                                       |
+| **VNG Cloud / CMC Cloud** | Cũng thuộc nhóm "4 trụ cột", tương tự FPT Cloud                      | Doanh nghiệp vừa/lớn                                                                                             |
+| **AZDIGI / TinoHost**     | Rẻ nhất trong nhóm, từ ~43.000-55.000đ/tháng                         | Dự án nhỏ, ngân sách hạn chế, chấp nhận hỗ trợ cơ bản hơn                                                        |
 
 ⚠️ Giá các hãng ở bảng này **chưa được kiểm chứng trực tiếp** qua giỏ hàng như
 VinaHost/BKNS/Vietnix/Hetzner ở trên (trang iNET không tải được pricing table

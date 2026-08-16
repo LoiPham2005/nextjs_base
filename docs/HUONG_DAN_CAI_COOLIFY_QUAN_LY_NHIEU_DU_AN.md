@@ -17,12 +17,12 @@ hình Nginx/SSL, tự quản lý Docker thủ công cho từng project.
 
 ## Vài công cụ phổ biến
 
-| Công cụ | Đặc điểm | Khi nào chọn |
-|---|---|---|
-| **Coolify** | Giao diện đẹp, gần giống Vercel/Netlify nhất, hỗ trợ Next.js/Postgres/Redis native, cộng đồng lớn, miễn phí & mã nguồn mở | **Khuyên dùng mặc định** — VPS ≥ 2GB RAM |
-| **CapRover** | Nhẹ hơn, dùng Docker Swarm phía dưới, cấu hình qua `captain-definition` file | Muốn nhẹ hơn Coolify nhưng vẫn có UI |
-| **Dokku** | Tối giản nhất, gần giống Heroku CLI (`git push dokku main` là deploy) | VPS RAM thấp (~1GB), quen dùng terminal hơn UI |
-| **Kamal** | Không phải PaaS full UI, là CLI orchestrate Docker deploy qua SSH | Đã quen Docker Compose, chỉ muốn gọn hơn |
+| Công cụ      | Đặc điểm                                                                                                                  | Khi nào chọn                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **Coolify**  | Giao diện đẹp, gần giống Vercel/Netlify nhất, hỗ trợ Next.js/Postgres/Redis native, cộng đồng lớn, miễn phí & mã nguồn mở | **Khuyên dùng mặc định** — VPS ≥ 2GB RAM       |
+| **CapRover** | Nhẹ hơn, dùng Docker Swarm phía dưới, cấu hình qua `captain-definition` file                                              | Muốn nhẹ hơn Coolify nhưng vẫn có UI           |
+| **Dokku**    | Tối giản nhất, gần giống Heroku CLI (`git push dokku main` là deploy)                                                     | VPS RAM thấp (~1GB), quen dùng terminal hơn UI |
+| **Kamal**    | Không phải PaaS full UI, là CLI orchestrate Docker deploy qua SSH                                                         | Đã quen Docker Compose, chỉ muốn gọn hơn       |
 
 Tradeoff chính của Coolify: tốn thêm ~1-2GB RAM chạy nền cho chính nó (ngoài
 RAM cho các app). Nếu VPS quá yếu, cân nhắc Dokku thay thế.

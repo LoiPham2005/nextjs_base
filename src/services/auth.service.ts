@@ -69,7 +69,10 @@ export class AuthService {
     const check = await CryptoUtils.verifyPassword(input.password, user.password);
 
     if (!check.valid) {
-      await this.registerFailedAttempt(user.id, Boolean(user.lockedUntil && user.lockedUntil > new Date()));
+      await this.registerFailedAttempt(
+        user.id,
+        Boolean(user.lockedUntil && user.lockedUntil > new Date()),
+      );
       throw new InvalidCredentialsError();
     }
 

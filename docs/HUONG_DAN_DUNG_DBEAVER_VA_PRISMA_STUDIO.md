@@ -2,12 +2,12 @@
 
 ## Khi nào dùng cái nào
 
-| Việc cần làm | Dùng gì | Vì sao |
-|---|---|---|
-| Xem/sửa nhanh vài dòng dữ liệu lúc dev | **Prisma Studio** | Hiểu quan hệ (`User` → `Role`, `Account`...) trực tiếp từ `schema.prisma`, không cần biết SQL |
-| Kiểm tra migration đã chạy chưa, xem cấu trúc bảng thật | **DBeaver** | Nhìn thẳng vào Postgres, không qua lớp diễn giải của Prisma |
-| Chạy SQL thô, `EXPLAIN ANALYZE`, tối ưu query chậm | **DBeaver** | Prisma Studio không cho chạy SQL tự do |
-| Backup/export dữ liệu, xem ER diagram toàn database | **DBeaver** | Prisma Studio chỉ thao tác qua model, không có công cụ export/diagram |
+| Việc cần làm                                            | Dùng gì           | Vì sao                                                                                        |
+| ------------------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
+| Xem/sửa nhanh vài dòng dữ liệu lúc dev                  | **Prisma Studio** | Hiểu quan hệ (`User` → `Role`, `Account`...) trực tiếp từ `schema.prisma`, không cần biết SQL |
+| Kiểm tra migration đã chạy chưa, xem cấu trúc bảng thật | **DBeaver**       | Nhìn thẳng vào Postgres, không qua lớp diễn giải của Prisma                                   |
+| Chạy SQL thô, `EXPLAIN ANALYZE`, tối ưu query chậm      | **DBeaver**       | Prisma Studio không cho chạy SQL tự do                                                        |
+| Backup/export dữ liệu, xem ER diagram toàn database     | **DBeaver**       | Prisma Studio chỉ thao tác qua model, không có công cụ export/diagram                         |
 
 Quy tắc chung: **Prisma Studio cho việc hằng ngày, DBeaver cho việc cần nhìn xuống tầng database thật.**
 
@@ -58,12 +58,12 @@ winget install -e --id dbeaver.dbeaver
 Lấy từ `docker-compose.yml` (giá trị mặc định) và `.env` (giá trị thật đang
 dùng — ưu tiên theo `.env` nếu có đổi khác mặc định):
 
-| Trường | Giá trị mặc định |
-|---|---|
-| Host | `localhost` |
-| Port | `5432` (đổi qua `POSTGRES_PORT` nếu có) |
-| Database | `nextjs_prisma_base` |
-| Username | `postgres` |
+| Trường   | Giá trị mặc định                                                  |
+| -------- | ----------------------------------------------------------------- |
+| Host     | `localhost`                                                       |
+| Port     | `5432` (đổi qua `POSTGRES_PORT` nếu có)                           |
+| Database | `nextjs_prisma_base`                                              |
+| Username | `postgres`                                                        |
 | Password | `postgres` (đổi theo `POSTGRES_PASSWORD` trong `.env` nếu đã đổi) |
 
 > Nếu chưa chạy `docker compose up -d postgres` thì DBeaver sẽ không kết nối
@@ -108,7 +108,7 @@ JOIN users u ON u.id = a."userId";
 ## Kết nối tới database production (trên VPS)
 
 Cả hai công cụ đều dùng được với DB production, không phải chỉ local — DBeaver
-và Prisma Studio luôn chạy trên MÁY BẠN, chỉ cần *kết nối mạng* tới được cổng
+và Prisma Studio luôn chạy trên MÁY BẠN, chỉ cần _kết nối mạng_ tới được cổng
 Postgres của VPS. Vấn đề duy nhất là kết nối bằng cách nào cho an toàn.
 
 `docker-compose.yml` map cổng `5432` ra host (`ports: "5432:5432"`) để tiện

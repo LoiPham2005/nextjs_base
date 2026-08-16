@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AccountBannedError, AccountLockedError, AuthService, InvalidCredentialsError } from "./auth.service";
+import {
+  AccountBannedError,
+  AccountLockedError,
+  AuthService,
+  InvalidCredentialsError,
+} from "./auth.service";
 
 vi.mock("@/lib/prisma", () => ({
   prisma: { user: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() } },
