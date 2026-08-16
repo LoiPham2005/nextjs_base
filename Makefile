@@ -3,7 +3,8 @@
         db-generate db-migrate db-deploy db-studio db-seed db-seed-dev db-seed-prod db-reset \
         docker-build docker-up docker-down docker-logs docker-ps \
         realtime docker-deploy docker-size docker-clean \
-        vps-deploy vps-logs vps-status vps-files
+        vps-deploy vps-logs vps-status vps-files \
+        pm2-deploy pm2-start pm2-stop pm2-restart pm2-reload pm2-logs pm2-status pm2-monit
 
 help:
 	@echo "========================================================================"
@@ -44,6 +45,16 @@ help:
 	@echo "  make docker-deploy   - Deploy trên VPS: build, up, health check, dọn rác"
 	@echo "  make docker-size     - Xem dung lượng image và rác build còn sót"
 	@echo "  make docker-clean    - Xoá image mồ côi do build lỗi (an toàn)"
+	@echo ""
+	@echo "--- DEPLOY: PM2 (Process Manager) ---"
+	@echo "  make pm2-deploy      - Deploy trên VPS bằng PM2 (pull, deps, migrate, build, reload)"
+	@echo "  make pm2-start       - Khởi động service bằng PM2"
+	@echo "  make pm2-stop        - Dừng service PM2"
+	@echo "  make pm2-restart     - Khởi động lại service PM2"
+	@echo "  make pm2-reload      - Zero-downtime reload service PM2"
+	@echo "  make pm2-logs        - Xem log PM2 realtime"
+	@echo "  make pm2-status      - Xem trạng thái tiến trình PM2"
+	@echo "  make pm2-monit       - Mở dashboard giám sát PM2"
 	@echo ""
 	@echo "--- DEPLOY: VPS TRỰC TIẾP (systemd + Caddy) ---"
 	@echo "  make vps-deploy      - Deploy trên máy chủ (pull, migrate, build, restart)"
@@ -162,7 +173,34 @@ docker-clean:
 	docker image prune -f
 	docker builder prune -f
 
-# --- VPS trực tiếp ---------------------------------------------------------
+# --- PM2 -------------------------------------------------------------------
+# Quản lý tiến trình bằng PM2 trên VPS
+
+pm2-deploy:
+	./scripts/deploy-pm2.sh
+
+pm2-start:
+	pm2 start ecosystem.config.cjs --env production
+
+pm2-stop:
+	pm2 stop ecosystem.config.cjs
+
+pm2-restart:
+	pm2 restart ecosystem.config.cjs --env production
+
+pm2-reload:
+	pm2 reload ecosystem.config.cjs --env production
+
+pm2-logs:
+	pm2 logs
+
+pm2-status:
+	pm2 status
+
+pm2-monit:
+	pm2 monit
+
+# --- VPS trực tiếp (systemd + Caddy) ---------------------------------------
 # Các target dưới đây chạy TRÊN MÁY CHỦ, không phải máy dev.
 
 SERVICE ?= nextjs-base
