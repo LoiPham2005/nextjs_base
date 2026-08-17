@@ -92,5 +92,21 @@ module.exports = {
       env: { NODE_ENV: "development", REALTIME_PORT: 3002 },
       env_production: { NODE_ENV: "production", REALTIME_PORT: 3002 },
     },
+    {
+      ...shared,
+      name: "nextjs-base-worker",
+      script: "worker/dist/worker.cjs",
+      // Chạy nhiều worker LÀ an toàn: BullMQ khoá job qua Redis nên mỗi job
+      // chỉ được giao cho đúng một worker. Nhưng mặc định vẫn để 1 — nâng lên
+      // khi hàng đợi thật sự ùn, đừng nâng "cho chắc".
+      instances: Number(process.env.PM2_WORKER_INSTANCES ?? 1),
+      exec_mode: "fork",
+      max_memory_restart: "700M",
+      // Đợi worker chạy nốt job đang dở trước khi giết. Mặc định PM2 chỉ cho
+      // 1.6 giây — quá ngắn cho phần lớn job thật.
+      kill_timeout: 60_000,
+      env: { NODE_ENV: "development" },
+      env_production: { NODE_ENV: "production" },
+    },
   ],
 };

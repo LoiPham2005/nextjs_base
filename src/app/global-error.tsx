@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
+import { captureException } from "@/lib/observability";
+
 /**
  * Bắt lỗi xảy ra ngay trong root layout — trường hợp `error.tsx` không cứu
  * được, vì lúc đó layout chưa render xong. Phải tự render <html>/<body>.
@@ -11,6 +14,13 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useEffect(() => {
+    // Lỗi tới được đây nghĩa là root layout đã hỏng — nghiêm trọng hơn hẳn
+    // `error.tsx`, và gần như chắc chắn ảnh hưởng MỌI người dùng. Đây là loại
+    // lỗi cần biết ngay, không phải đợi ai đó báo.
+    captureException(error, { digest: error.digest, boundary: "global" });
+  }, [error]);
+
   return (
     <html lang="vi">
       <body

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { tokenService } from "@/services/token.service";
 import { verificationService } from "@/services/verification.service";
+import { auditService } from "@/services/audit.service";
 
 /**
  * Dọn token đã hết hạn hoặc đã dùng.
@@ -39,9 +40,22 @@ async function main() {
   const refreshTokens = await tokenService.purgeExpired();
   const verificationTokens = await verificationService.purgeExpired();
 
-  logger.info("Dọn token hết hạn xong", {
+  /*
+   * Nhật ký thao tác cũng là bảng chỉ tăng, nhưng giữ LÂU HƠN token rất nhiều.
+   *
+   * 90 ngày là con số cho vận hành: đủ để điều tra "tháng trước ai đổi phân
+   * quyền". Nếu bạn có yêu cầu tuân thủ (kế toán, y tế, tài chính) thì con số
+   * này phải do quy định quyết định, có thể là nhiều năm — và đừng bao giờ hạ
+   * nó xuống chỉ vì database đang đầy.
+   */
+  const auditDays = Number(process.env.AUDIT_RETENTION_DAYS ?? 90);
+  const auditLogs = await auditService.purgeOlderThan(auditDays);
+
+  logger.info("Dọn dữ liệu hết hạn xong", {
     refreshTokens,
     verificationTokens,
+    auditLogs,
+    auditRetentionDays: auditDays,
     durationMs: Date.now() - startedAt,
   });
 }

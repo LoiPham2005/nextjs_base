@@ -18,6 +18,8 @@ SERVICE="${SERVICE:-nextjs-base}"
 # Tiến trình WebSocket chạy riêng. Đặt REALTIME_SERVICE= (rỗng) nếu dự án của
 # bạn không dùng realtime.
 REALTIME_SERVICE="${REALTIME_SERVICE:-nextjs-base-realtime}"
+# Tiến trình chạy job nền. Đặt WORKER_SERVICE= (rỗng) nếu chưa dùng hàng đợi.
+WORKER_SERVICE="${WORKER_SERVICE:-nextjs-base-worker}"
 ENV_FILE="${ENV_FILE:-/etc/nextjs-base/env}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3000/api/health}"
 
@@ -65,6 +67,11 @@ if [ -d "realtime" ]; then
 	pnpm realtime:build
 fi
 
+if [ -d "worker" ]; then
+	step "Build worker (job nền)"
+	pnpm worker:build
+fi
+
 step "Khởi động lại service"
 sudo systemctl restart "$SERVICE"
 
@@ -76,6 +83,14 @@ if [ -n "$REALTIME_SERVICE" ] && systemctl list-unit-files "$REALTIME_SERVICE.se
 elif [ -n "$REALTIME_SERVICE" ]; then
 	printf '  \033[1;33m⚠️  Chưa cài %s.service — WebSocket sẽ KHÔNG chạy.\033[0m\n' "$REALTIME_SERVICE"
 	printf '     Cài: sudo cp deploy/nextjs-base-realtime.service /etc/systemd/system/\n'
+fi
+
+if [ -n "$WORKER_SERVICE" ] && systemctl list-unit-files "$WORKER_SERVICE.service" --no-legend 2>/dev/null | grep -q .; then
+	step "Khởi động lại worker"
+	sudo systemctl restart "$WORKER_SERVICE"
+elif [ -n "$WORKER_SERVICE" ]; then
+	printf '  \033[1;33m⚠️  Chưa cài %s.service — job nền sẽ nằm trong hàng đợi mà KHÔNG ai chạy.\033[0m\n' "$WORKER_SERVICE"
+	printf '     Cài: sudo cp deploy/nextjs-base-worker.service /etc/systemd/system/\n'
 fi
 
 step "Kiểm tra sức khoẻ"

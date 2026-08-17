@@ -1,6 +1,18 @@
 import "server-only";
 import { env } from "./env";
-import { getMailer } from "./mailer";
+import { enqueue } from "./queue";
+
+/**
+ * Mọi email đi qua HÀNG ĐỢI, không gửi thẳng.
+ *
+ * Vì sao: SMTP có thể mất vài giây, và người dùng bấm "quên mật khẩu" không
+ * nên ngồi chờ chừng ấy chỉ để nhận về một trang xác nhận. Quan trọng hơn —
+ * hàng đợi có THỬ LẠI: nhà cung cấp thư nghẽn một lúc thì job tự chạy lại,
+ * thay vì lá thư biến mất vĩnh viễn.
+ *
+ * Chưa cấu hình Redis thì `enqueue` tự chạy ngay trong tiến trình hiện tại ở
+ * môi trường dev, và NÉM LỖI ở production — xem `src/lib/queue.ts`.
+ */
 
 /**
  * Nội dung các email hệ thống.
@@ -31,7 +43,7 @@ export async function sendVerificationEmail(to: string, token: string): Promise<
   const link = appUrl(`/verify-email?token=${encodeURIComponent(token)}`);
   const hours = env.EMAIL_VERIFICATION_TTL_HOURS;
 
-  await getMailer().send({
+  await enqueue("email:send", {
     to,
     subject: "Xác thực địa chỉ email của bạn",
     text: [
@@ -51,7 +63,7 @@ export async function sendPasswordResetEmail(to: string, token: string): Promise
   const link = appUrl(`/reset-password?token=${encodeURIComponent(token)}`);
   const minutes = env.PASSWORD_RESET_TTL_MINUTES;
 
-  await getMailer().send({
+  await enqueue("email:send", {
     to,
     subject: "Đặt lại mật khẩu",
     text: [

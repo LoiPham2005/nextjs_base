@@ -1,4 +1,5 @@
 import { isProduction } from "./env";
+import { captureException } from "./observability";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -72,5 +73,17 @@ export const logger = {
   },
   error(message: string, error?: unknown, context?: LogContext) {
     emit("error", message, { ...context, ...(error === undefined ? {} : serializeError(error)) });
+
+    /*
+     * Đẩy luôn ra hệ thống giám sát bên ngoài.
+     *
+     * Đặt ở ĐÂY chứ không bắt từng nơi gọi tự nhớ: `logger.error` đã là điểm
+     * duy nhất mà mọi lỗi đi qua, nên nối vào đây là phủ được toàn bộ ứng
+     * dụng bằng một dòng — thay vì rải `Sentry.captureException` khắp nơi rồi
+     * quên vài chỗ.
+     *
+     * Chưa cắm nhà cung cấp thì đây là hàm rỗng, không tốn gì.
+     */
+    captureException(error ?? new Error(message), { message, ...context });
   },
 };

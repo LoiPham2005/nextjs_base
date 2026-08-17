@@ -41,7 +41,7 @@ COPY . .
 # giá trị env ở thời điểm này. Bỏ qua validation để build không đòi .env.
 ENV SKIP_ENV_VALIDATION=1 \
     DATABASE_URL=postgresql://build:build@localhost:5432/build
-RUN pnpm db:generate && pnpm build && pnpm realtime:build
+RUN pnpm db:generate && pnpm build && pnpm realtime:build && pnpm worker:build
 
 # ---------------------------------------------------------------------------
 # migrator — image một-lần-chạy để apply migration trước khi web khởi động.
@@ -90,6 +90,25 @@ EXPOSE 3002
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "realtime/dist/server.cjs"]
+
+# ---------------------------------------------------------------------------
+# worker — chạy job nền, TIẾN TRÌNH RIÊNG với web.
+#
+# Tách vì ba lý do (chi tiết trong worker/worker.ts): deploy web không được
+# giết job đang chạy, job nặng không được làm chậm request, và hai bên cần
+# scale theo hai con số khác nhau.
+#
+# Không EXPOSE cổng nào và không có HEALTHCHECK qua HTTP: worker không phục vụ
+# request. Nó "khoẻ" khi còn lấy được job ra khỏi Redis — muốn giám sát thì
+# theo dõi độ dài hàng đợi, đừng ping cổng.
+# ---------------------------------------------------------------------------
+FROM base AS worker
+ENV NODE_ENV=production
+RUN addgroup -g 1001 -S nodejs \
+ && adduser -u 1001 -S -G nodejs nextjs
+COPY --from=builder --chown=nextjs:nodejs /app/worker/dist ./worker/dist
+USER nextjs
+CMD ["node", "worker/dist/worker.cjs"]
 
 # ---------------------------------------------------------------------------
 # runner — image production, chỉ chứa output standalone

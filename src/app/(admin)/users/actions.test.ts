@@ -14,6 +14,16 @@ import { SelfDeletionError, UsernameAlreadyExistsError } from "@/services/user.s
 vi.mock("@/lib/auth", () => ({ getSession: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+/**
+ * `defineAction` hỏi `permissionService.can()` chứ không so `role === "ADMIN"`
+ * nữa. Mock ở đây để test không cần một Postgres đang chạy — thứ đang kiểm là
+ * "action phản ứng thế nào với quyền", không phải "quyền được đọc lên ra sao"
+ * (đã có `permission.service.test.ts` lo).
+ */
+vi.mock("@/services/permission.service", () => ({
+  permissionService: { can: vi.fn() },
+}));
+
 vi.mock("@/services/user.service", async (importOriginal) => {
   // Giữ nguyên các lớp lỗi thật để `instanceof` trong action vẫn đúng.
   const actual = await importOriginal<typeof UserServiceModule>();
@@ -24,6 +34,7 @@ vi.mock("@/services/user.service", async (importOriginal) => {
 });
 
 import { getSession } from "@/lib/auth";
+import { permissionService } from "@/services/permission.service";
 import { userService } from "@/services/user.service";
 import { createUserAction, deleteUserAction } from "./actions";
 
@@ -38,6 +49,11 @@ function form(fields: Record<string, string>): FormData {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Mặc định: ADMIN có mọi quyền, vai trò khác thì không. Test nào cần vai trò
+  // tuỳ chỉnh (ví dụ KE_TOAN được `user:create`) thì tự ghi đè.
+  vi.mocked(permissionService.can).mockImplementation((roleKey) =>
+    Promise.resolve(roleKey === "ADMIN"),
+  );
 });
 
 describe("createUserAction", () => {

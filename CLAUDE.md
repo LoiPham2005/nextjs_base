@@ -32,7 +32,10 @@ pnpm db:generate                # sinh lại Prisma Client sau khi sửa schema.
 pnpm db:migrate                 # tạo + áp migration mới (dev)
 pnpm db:studio                  # GUI xem/sửa data — http://localhost:5555
 pnpm db:seed:dev                # dữ liệu mẫu (roles, user demo)
-pnpm db:purge                   # dọn token hết hạn (chạy qua tsconfig.scripts.json)
+pnpm db:purge                   # dọn token hết hạn + nhật ký cũ (qua tsconfig.scripts.json)
+
+pnpm realtime:dev               # WebSocket, tiến trình riêng (cổng 3002)
+pnpm worker:dev                 # job nền, tiến trình riêng — cần REDIS_URL
 ```
 
 ⚠️ `pnpm test:e2e` cần database đã seed (`pnpm db:seed:dev`) — bộ test đăng nhập bằng tài
@@ -120,6 +123,39 @@ nhật vào README**:
 - **Chưa có backup database tự động** — self-host Postgres qua Docker Compose, VPS mất là mất data.
   Xem [docs/disaster-recovery.md](docs/disaster-recovery.md) và
   [docs/HUONG_DAN_CHON_CONG_NGHE_HA_TANG.md](docs/HUONG_DAN_CHON_CONG_NGHE_HA_TANG.md).
+
+## Hạ tầng đã có (thêm sau khi README được viết)
+
+Sáu lớp dưới đây đều theo **cùng một khuôn**: một interface hẹp + bản mặc định cho dev, cắm nhà
+cung cấp thật bằng một hàm `setX()` lúc khởi động. Giống hệt `src/lib/mailer.ts` — bộ khung cố ý
+không chọn sẵn nhà cung cấp cho bạn.
+
+| Lớp                      | File                            | Mặc định khi chưa cấu hình                 |
+| ------------------------ | ------------------------------- | ------------------------------------------ |
+| Kiểm quyền Server Action | `src/lib/define-action.ts`      | — (luôn bật)                               |
+| Cache                    | `src/lib/cache.ts`              | RAM tiến trình                             |
+| Job queue                | `src/lib/queue.ts` + `worker/`  | Dev: chạy ngay tại chỗ · Prod: **ném lỗi** |
+| Nhật ký thao tác         | `src/services/audit.service.ts` | — (luôn ghi)                               |
+| Giám sát lỗi             | `src/lib/observability.ts`      | Không làm gì (log vẫn có)                  |
+| Lưu trữ file             | `src/lib/storage.ts`            | Dev: ghi đĩa · Prod: **ném lỗi**           |
+
+Vài điểm dễ sai:
+
+- **`defineAction` biến kiểm quyền thành ràng buộc KIỂU.** Mọi Server Action mới phải bọc bằng nó
+  — không khai báo quyền là không biên dịch được. Đừng quay lại lối viết `if (!session) return`
+  thủ công: quên một chỗ thì không có gì báo.
+- **Job queue: `enqueue()` ném lỗi trên production khi thiếu `REDIS_URL`.** Cố ý — job bị nuốt
+  trong im lặng nghĩa là email không bao giờ gửi mà không ai biết. Mọi email đã đi qua hàng đợi.
+- **`worker/` là tiến trình thứ ba**, sau `web` và `realtime`. Cả ba đường deploy đã nối sẵn.
+  Thiếu nó thì job nằm trong Redis mà không ai chạy.
+- **`logger.error()` tự đẩy sang `captureException`** — không cần rải `Sentry.captureException`
+  khắp nơi, và cũng đừng làm vậy.
+- **`assertUploadAllowed` đọc magic bytes, không tin `file.type`.** Với ảnh thì "không chứng minh
+  được là ảnh" = từ chối (danh sách trắng). Với PDF/zip thì chưa kiểm được nội dung — phục vụ
+  chúng từ tên miền khác kèm `Content-Disposition: attachment`.
+- **Audit log KHÔNG có khoá ngoại tới `users`** — nhật ký phải sống lâu hơn đối tượng nó ghi lại.
+  `record()` nuốt mọi lỗi để không làm hỏng thao tác chính; cần chắc chắn thì dùng
+  `recordOrThrow()` trong cùng transaction.
 
 ## Tài liệu khác trong `docs/`
 

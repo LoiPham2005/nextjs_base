@@ -64,6 +64,11 @@ if [ -d "realtime" ]; then
 	pnpm realtime:build
 fi
 
+if [ -d "worker" ]; then
+	step "Build Worker (job nền)"
+	pnpm worker:build
+fi
+
 step "Khởi động / Reload PM2"
 if [ -f "$ECOSYSTEM_FILE" ]; then
 	pm2 startOrReload "$ECOSYSTEM_FILE" --env production --update-env

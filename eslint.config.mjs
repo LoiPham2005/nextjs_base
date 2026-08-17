@@ -11,6 +11,7 @@ export default tseslint.config(
       ".next/**",
       "coverage/**",
       "realtime/dist/**",
+      "worker/dist/**",
       "next-env.d.ts",
       "*.tsbuildinfo",
     ],

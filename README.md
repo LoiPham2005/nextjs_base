@@ -74,6 +74,7 @@ nextjs_base/
 │   ├── schemas/               # Zod schema (nguồn sự thật cho validation)
 │   └── services/              # Tầng nghiệp vụ — nơi duy nhất gọi Prisma
 ├── realtime/                  # Máy chủ WebSocket — TIẾN TRÌNH RIÊNG, ngoài Next
+├── worker/                    # Job nền (BullMQ) — TIẾN TRÌNH RIÊNG thứ ba
 ├── e2e/                       # Playwright — luồng đăng nhập/phân quyền trên trình duyệt thật
 ├── scripts/                   # Deploy + tác vụ vận hành (purge-expired.ts)
 ├── deploy/                    # systemd unit, timer dọn token, Caddyfile

@@ -193,5 +193,40 @@ services:
       start_period: 10s
       retries: 3
 
+  # Chạy job nền: gửi email, gọi API bên thứ ba, xuất báo cáo.
+  #
+  # Không công bố cổng nào — worker không phục vụ request, nó chỉ lấy job ra
+  # khỏi Redis. Muốn giám sát thì theo dõi độ dài hàng đợi, không phải ping cổng.
+  worker:
+    build:
+      context: .
+      target: worker
+    container_name: nextjs_prisma_worker
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *database-url
+      NODE_ENV: production
+      # BẮT BUỘC với worker — khác web và realtime, nó không có việc gì để làm
+      # nếu thiếu hàng đợi. `:?` khiến compose dừng ngay thay vì dựng một tiến
+      # trình ngồi im trông như đang hoạt động.
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+    # Cho worker đủ thời gian chạy nốt job đang dở trước khi bị giết.
+    #
+    # Mặc định Docker chỉ đợi 10 giây sau SIGTERM rồi SIGKILL — cắt ngang một
+    # job đã trừ tiền nhưng chưa ghi nhận là để lại dữ liệu sai. Nâng lên theo
+    # job dài nhất của bạn.
+    stop_grace_period: 60s
+
 volumes:
   postgres_data:

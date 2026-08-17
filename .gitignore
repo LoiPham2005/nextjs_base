@@ -4,6 +4,7 @@ node_modules
 # build outputs
 .next
 realtime/dist
+worker/dist
 out
 dist
 build

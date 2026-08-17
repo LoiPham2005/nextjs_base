@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { captureException } from "@/lib/observability";
 
 /**
  * Error boundary cho toàn bộ route tree. Không có file này, một exception chưa
@@ -15,10 +16,14 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Chỗ nối Sentry / Datadog. `digest` là mã Next.js gán cho lỗi phía server,
-    // dùng để tra lại đúng stack trace trong log — thông điệp gốc bị ẩn khỏi
-    // client trên production, cố ý như vậy.
-    console.error("Unhandled error", { digest: error.digest, message: error.message });
+    // `digest` là mã Next.js gán cho lỗi phía server, dùng để tra lại đúng
+    // stack trace trong log — thông điệp gốc bị ẩn khỏi client trên
+    // production, cố ý như vậy.
+    //
+    // Không dùng `logger` ở đây: file này chạy trên TRÌNH DUYỆT, còn logger là
+    // module server-side. `captureException` thì chạy được cả hai phía —
+    // chưa cắm nhà cung cấp thì nó là hàm rỗng (xem src/lib/observability.ts).
+    captureException(error, { digest: error.digest, boundary: "route" });
   }, [error]);
 
   return (
