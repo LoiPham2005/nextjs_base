@@ -116,7 +116,7 @@ nhật vào README**:
   phải ranh giới bảo mật** — Server Action không đi qua nó. Mỗi trang vẫn tự `requirePermission`
   (mỗi trang cần quyền khác nhau), mỗi action vẫn tự kiểm quyền.
 - **`src/lib/cn.ts`** (đổi tên từ `utils.ts`) — chỉ chứa hàm `cn()`. Tên `utils` là bãi rác, đổi
-  tên để không ai nhét hàm không liên quan vào. `format.ts` đã bị xoá vì không nơi nào dùng.
+  tên để không ai nhét hàm không liên quan vào. `format.ts` (tiền VNĐ, ngày `vi-VN`, số điện thoại VN, slug bỏ dấu) hiện chưa nơi nào gọi tới, nhưng **được giữ lại** vì không lệnh nào tạo lại được — khác hẳn component shadcn. Bù lại nó có `format.test.ts` phủ kín: tiện ích chưa dùng mà không test thì tới ngày cần dùng mới phát hiện đã hỏng.
 - **Chưa có backup database tự động** — self-host Postgres qua Docker Compose, VPS mất là mất data.
   Xem [docs/disaster-recovery.md](docs/disaster-recovery.md) và
   [docs/HUONG_DAN_CHON_CONG_NGHE_HA_TANG.md](docs/HUONG_DAN_CHON_CONG_NGHE_HA_TANG.md).
