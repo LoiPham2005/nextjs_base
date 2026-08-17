@@ -1,4 +1,5 @@
-import { Worker, type Job } from "bullmq";
+import { createServer, type Server as HttpServer } from "node:http";
+import { Queue, Worker, type Job } from "bullmq";
 import { logger } from "@/lib/logger";
 import { jobHandlers } from "@/jobs/handlers";
 import type { JobName, JobPayloads } from "@/jobs/types";
@@ -29,6 +30,43 @@ import { workerEnv } from "./env";
 export type WorkerHandle = {
   stop: () => Promise<void>;
 };
+
+/**
+ * Endpoint `/health` — cách duy nhất để bên ngoài biết worker còn sống.
+ *
+ * Worker không phục vụ request nghiệp vụ, nên không có gì để ping. Thiếu
+ * endpoint này thì Docker, systemd và PM2 đều chỉ biết "tiến trình còn tồn
+ * tại" — một worker treo vì mất kết nối Redis vẫn được coi là khoẻ.
+ *
+ * Trả kèm số job trong hàng đợi. Đây là phần đáng giá nhất: nó biến việc "xem
+ * hàng đợi có ùn không" từ chuyện phải SSH vào gõ `redis-cli` thành một lệnh
+ * `curl`. Job hỏng mà không ai nhìn thấy là job không tồn tại.
+ */
+function startHealthServer(queue: Queue): HttpServer {
+  const server = createServer((req, res) => {
+    if (req.url !== "/health") {
+      res.writeHead(404).end();
+      return;
+    }
+
+    void queue
+      .getJobCounts("waiting", "active", "delayed", "failed")
+      .then((counts) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ status: "ok", counts }));
+      })
+      .catch(() => {
+        // Không đếm được job nghĩa là mất kết nối Redis — worker vẫn "chạy"
+        // nhưng không làm được việc gì. Phải trả 503 để trình quản lý tiến
+        // trình xoay vòng nó, thay vì để nó ngồi im và trông như đang khoẻ.
+        res.writeHead(503, { "content-type": "application/json" });
+        res.end(JSON.stringify({ status: "error", queue: "unreachable" }));
+      });
+  });
+
+  server.listen(workerEnv.WORKER_HEALTH_PORT, "0.0.0.0");
+  return server;
+}
 
 export function startWorker(): WorkerHandle {
   const worker = new Worker(
@@ -83,13 +121,24 @@ export function startWorker(): WorkerHandle {
     logger.error("Worker lỗi", error);
   });
 
-  logger.info("Worker đã chạy", { concurrency: workerEnv.WORKER_CONCURRENCY });
+  // Hàng đợi chỉ để ĐỌC số liệu cho `/health`, không dùng để đẩy job.
+  const queue = new Queue("app", { connection: { url: workerEnv.REDIS_URL } });
+  const healthServer = startHealthServer(queue);
+
+  logger.info("Worker đã chạy", {
+    concurrency: workerEnv.WORKER_CONCURRENCY,
+    healthPort: workerEnv.WORKER_HEALTH_PORT,
+  });
 
   return {
     // `close()` đợi các job ĐANG chạy xong rồi mới thoát. Đây là điều kiện để
     // deploy không làm mất việc — xem xử lý SIGTERM trong `main.ts`.
     stop: async () => {
+      // Đóng health server TRƯỚC: trình quản lý tiến trình lập tức thấy worker
+      // không còn nhận request, thay vì thấy nó vẫn "khoẻ" trong lúc đang tắt.
+      healthServer.close();
       await worker.close();
+      await queue.close();
     },
   };
 }

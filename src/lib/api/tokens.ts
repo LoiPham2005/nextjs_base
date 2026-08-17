@@ -10,6 +10,18 @@ export type TokenPair = {
   tokenType: "Bearer";
   refreshToken: string;
   refreshExpiresAt: string;
+  /**
+   * Id của phiên vừa cấp.
+   *
+   * Không phải bí mật — token thật đã băm SHA-256 trước khi lưu, biết id cũng
+   * không đăng nhập được. Client lưu lại để đánh dấu "thiết bị này" trên màn
+   * `GET /auth/sessions`: access token không mang thông tin gì về refresh
+   * token đã sinh ra nó, nên thiếu id thì màn hình đó không tự nhận ra mình.
+   *
+   * ⚠️ Đổi sau mỗi lần refresh, vì refresh token xoay vòng. Client phải cập
+   * nhật lại giá trị này mỗi lần gọi `/auth/refresh`.
+   */
+  sessionId: string;
 };
 
 /**
@@ -35,5 +47,6 @@ export async function issueTokenPair(
     tokenType: "Bearer",
     refreshToken: refresh.token,
     refreshExpiresAt: refresh.expiresAt.toISOString(),
+    sessionId: refresh.id,
   };
 }

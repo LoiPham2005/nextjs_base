@@ -157,6 +157,15 @@ Vài điểm dễ sai:
   `record()` nuốt mọi lỗi để không làm hỏng thao tác chính; cần chắc chắn thì dùng
   `recordOrThrow()` trong cùng transaction.
 
+- **`GET`/`DELETE /api/v1/auth/sessions[/id]`** — màn "thiết bị đang đăng nhập". Ràng buộc quyền
+  sở hữu nằm TRONG câu truy vấn (`where: { id, userId }`), không phải một phép kiểm tra riêng —
+  `id` đến từ URL nên người gọi tự đặt được. Trả 404 cho cả "không tồn tại" lẫn "của người khác".
+  `TokenPair` giờ có thêm `sessionId` để client tự nhận ra phiên của mình; nó **đổi sau mỗi lần
+  refresh** vì refresh token xoay vòng.
+- **`/users` phân trang kiểu cursor**, không phải offset: danh sách đang được sửa liên tục nên
+  offset lệch ngay khi có dòng chèn vào giữa. Không có nút "Trang trước" — mỗi trang là một URL
+  riêng nên nút Back của trình duyệt làm đúng việc đó.
+
 ## Tài liệu khác trong `docs/`
 
 - [DEPLOY_COOLIFY.md](docs/DEPLOY_COOLIFY.md) — deploy bằng Coolify (self-hosted PaaS). Bắt buộc

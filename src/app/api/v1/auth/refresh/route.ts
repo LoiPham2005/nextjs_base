@@ -47,6 +47,9 @@ export async function POST(request: Request) {
       tokenType: "Bearer" as const,
       refreshToken: rotated.refresh.token,
       refreshExpiresAt: rotated.refresh.expiresAt.toISOString(),
+      // Refresh token xoay vòng nên id phiên cũng đổi. Client phải ghi đè giá
+      // trị cũ, nếu không màn "thiết bị đang đăng nhập" sẽ đánh dấu nhầm.
+      sessionId: rotated.refresh.id,
     });
   } catch (error) {
     return handleApiError(error, { route: "POST /api/v1/auth/refresh", request });

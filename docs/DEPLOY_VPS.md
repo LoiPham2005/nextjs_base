@@ -9,9 +9,17 @@ chuẩn bị ở mục 1 và 2 — đọc hai mục đó trước, rồi nhảy 
 | [systemd + Caddy](#5-cách-b--systemd--caddy) | VPS nhỏ (1GB RAM), hoặc đã có Postgres sẵn. Siết quyền tốt nhất. |
 | [PM2](#6-cách-c--pm2)                        | Quen PM2 rồi, hoặc cần `reload` không rớt kết nối.               |
 
-Cả ba đều chạy **hai tiến trình**: `web` (Next.js) và `realtime` (WebSocket).
-Thiếu tiến trình thứ hai thì web vẫn chạy bình thường nhưng realtime im lặng
-không hoạt động — không có lỗi nào báo cho bạn biết.
+Cả ba đều chạy **ba tiến trình**:
+
+| Tiến trình | Việc             | Thiếu nó thì sao                                 |
+| ---------- | ---------------- | ------------------------------------------------ |
+| `web`      | Next.js          | Không có gì chạy                                 |
+| `realtime` | WebSocket        | Web vẫn chạy, realtime im lặng không hoạt động   |
+| `worker`   | Job nền (BullMQ) | **Mọi email nằm trong hàng đợi mà không ai gửi** |
+
+Cả hai tiến trình phụ đều hỏng trong im lặng — không có lỗi nào báo cho bạn
+biết. Riêng `worker` đáng chú ý nhất: từ khi email đi qua hàng đợi, thiếu
+worker nghĩa là **không lá thư nào được gửi**, kể cả email đặt lại mật khẩu.
 
 ---
 
@@ -213,14 +221,21 @@ pnpm build
 pnpm realtime:build
 pnpm db:seed:prod          # tạo admin lần đầu
 
+pnpm worker:build
+
 sudo cp deploy/nextjs-base.service /etc/systemd/system/
 sudo cp deploy/nextjs-base-realtime.service /etc/systemd/system/
+sudo cp deploy/nextjs-base-worker.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now nextjs-base nextjs-base-realtime
+sudo systemctl enable --now nextjs-base nextjs-base-realtime nextjs-base-worker
 ```
 
-⚠️ **Đừng quên `nextjs-base-realtime.service`.** Cài thiếu nó thì web chạy
-bình thường, chỉ có WebSocket là không tồn tại — và không có gì báo cho bạn.
+⚠️ **Đừng quên hai unit phụ.** Cài thiếu `nextjs-base-realtime` thì WebSocket
+không tồn tại; cài thiếu `nextjs-base-worker` thì **không email nào được gửi** —
+job nằm nguyên trong Redis. Cả hai đều không báo lỗi gì.
+
+⚠️ **`worker` bắt buộc có `REDIS_URL`** trong `/etc/nextjs-base/env`. Khác web
+và realtime, nó dừng ngay với thông báo rõ ràng nếu thiếu — thay vì ngồi im.
 
 Dọn token định kỳ (systemd timer, không cần crontab):
 
@@ -261,6 +276,7 @@ thì phải tự viết `location /socket.io/` kèm `proxy_set_header Upgrade` v
 ```bash
 journalctl -u nextjs-base -f
 journalctl -u nextjs-base-realtime -f
+journalctl -u nextjs-base-worker -f
 ```
 
 ---
@@ -337,6 +353,11 @@ curl -s https://your-domain.com/api/health
 # 2. Realtime sống  (chạy TRÊN máy chủ — cổng này không mở ra ngoài)
 curl -s http://127.0.0.1:3002/health
 # mong đợi: {"status":"ok","connections":0}
+
+# 2b. Worker sống VÀ nối được hàng đợi
+curl -s http://127.0.0.1:3003/health
+# mong đợi: {"status":"ok","counts":{"waiting":0,"active":0,"delayed":0,"failed":0}}
+# 503 = mất kết nối Redis. `failed` tăng dần = job đang hỏng, xem log worker.
 
 # 3. API trả JSON, không phải HTML chuyển hướng
 curl -s -i https://your-domain.com/api/v1/users | head -3

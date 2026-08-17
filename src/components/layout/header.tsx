@@ -56,9 +56,14 @@ export async function Header() {
         <div className="flex items-center gap-3">
           {user ? (
             <>
-              <span className="hidden text-sm text-muted sm:inline">
+              {/* Tên người dùng dẫn thẳng tới màn quản lý thiết bị — đó là
+                  chỗ người ta tìm khi nghi ngờ tài khoản bị đăng nhập lạ. */}
+              <Link
+                href="/sessions"
+                className="hidden text-sm text-muted transition-colors hover:text-content sm:inline"
+              >
                 {user.fullName ?? user.email}
-              </span>
+              </Link>
               <form action={apiPath("/auth/logout")} method="POST">
                 <Button size="sm" variant="outline" type="submit">
                   Đăng xuất

@@ -23,6 +23,7 @@ này chỉ có Docker Compose là đúng, vì nó cần **năm thứ chạy cùn
 | `web`      | Next.js                                                         |
 | `redis`    | Rate limit dùng chung + adapter cho realtime                    |
 | `realtime` | WebSocket, **tiến trình riêng**                                 |
+| `worker`   | Job nền — thiếu nó thì **không email nào được gửi**             |
 
 Chọn Nixpacks hay Dockerfile thì Coolify chỉ dựng đúng một container `web`.
 Hậu quả: không có migrate (schema chưa tạo → app chết ngay), và không có

@@ -22,6 +22,18 @@ const schema = z.object({
    * job chủ yếu chờ mạng (gửi mail, gọi API) thì nâng lên được.
    */
   WORKER_CONCURRENCY: z.coerce.number().int().positive().max(100).default(5),
+
+  /**
+   * Cổng cho endpoint `/health` của worker.
+   *
+   * Worker không phục vụ request nghiệp vụ, nhưng vẫn cần một cách để bên
+   * ngoài biết nó còn sống — Docker và trình quản lý tiến trình không có cách
+   * nào khác để phân biệt "đang chạy" với "đã treo".
+   *
+   * Endpoint này trả kèm số job đang chờ/đang chạy/đã hỏng, nên nó cũng là
+   * cách rẻ nhất để nhìn thấy hàng đợi mà không phải gõ `redis-cli`.
+   */
+  WORKER_HEALTH_PORT: z.coerce.number().int().positive().default(3003),
 });
 
 const parsed = schema.safeParse(process.env);

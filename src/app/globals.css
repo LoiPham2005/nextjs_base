@@ -350,6 +350,12 @@
     color: var(--success-color);
   }
 
+  .alert-warning {
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: var(--warning-color);
+  }
+
   /* Bảng tick quyền trên trang /roles. */
   .permission-grid {
     display: grid;

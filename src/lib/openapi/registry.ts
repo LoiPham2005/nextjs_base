@@ -97,6 +97,11 @@ const tokenPairSchema = registry.register(
     tokenType: z.literal("Bearer"),
     refreshToken: z.string(),
     refreshExpiresAt: z.iso.datetime(),
+    sessionId: z.string().openapi({
+      description:
+        "Id phiên vừa cấp. Không phải bí mật. Client lưu lại để đánh dấu " +
+        "'thiết bị này' trên GET /auth/sessions. ĐỔI sau mỗi lần refresh.",
+    }),
   }),
 );
 
@@ -199,6 +204,43 @@ registry.registerPath({
   security: [{ [bearerAuth.name]: [] }],
   summary: "Gửi lại email xác thực",
   responses: { ...okResponse(z.object({}), "Đã gửi"), ...errorResponses(401, 429) },
+});
+
+const sessionSchema = z.object({
+  id: z.string().openapi({ description: "Đối chiếu với `sessionId` nhận lúc đăng nhập/refresh" }),
+  userAgent: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime(),
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/auth/sessions",
+  tags: ["Auth"],
+  security: [{ [bearerAuth.name]: [] }],
+  summary:
+    "Thiết bị đang đăng nhập — CHỈ của chính mình. " +
+    "Response không tự đánh dấu phiên hiện tại: client đối chiếu với `sessionId` " +
+    "nhận được lúc đăng nhập/refresh (access token không mang thông tin đó).",
+  responses: {
+    ...okResponse(z.object({ sessions: z.array(sessionSchema) })),
+    ...errorResponses(401),
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/auth/sessions/{id}",
+  tags: ["Auth"],
+  security: [{ [bearerAuth.name]: [] }],
+  summary:
+    "Đăng xuất một thiết bị. Trả 404 cho cả phiên không tồn tại lẫn phiên của " +
+    "người khác — phân biệt hai ca đó là xác nhận id có thật.",
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    ...okResponse(z.object({ id: z.string() })),
+    ...errorResponses(401, 404),
+  },
 });
 
 // --- Users (ADMIN) --------------------------------------------------------

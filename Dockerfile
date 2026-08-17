@@ -103,11 +103,17 @@ CMD ["node", "realtime/dist/server.cjs"]
 # theo dõi độ dài hàng đợi, đừng ping cổng.
 # ---------------------------------------------------------------------------
 FROM base AS worker
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    WORKER_HEALTH_PORT=3003
 RUN addgroup -g 1001 -S nodejs \
  && adduser -u 1001 -S -G nodejs nextjs
 COPY --from=builder --chown=nextjs:nodejs /app/worker/dist ./worker/dist
 USER nextjs
+EXPOSE 3003
+# `/health` trả 503 khi không đếm được job — tức là mất kết nối Redis. Không có
+# nó, một worker treo vẫn được coi là khoẻ vì tiến trình còn tồn tại.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "worker/dist/worker.cjs"]
 
 # ---------------------------------------------------------------------------

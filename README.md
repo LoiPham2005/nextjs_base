@@ -526,6 +526,8 @@ mọi handler phải gọi `requireApiUser()` hoặc `requireApiAdmin()`.
 | `POST` | `/api/v1/auth/reset-password` | token trong email |
 | `POST` | `/api/v1/auth/verify-email` | token trong email |
 | `POST` | `/api/v1/auth/verify-email/request` | đã đăng nhập |
+| `GET` | `/api/v1/auth/sessions` | đã đăng nhập — chỉ phiên của chính mình |
+| `DELETE` | `/api/v1/auth/sessions/{id}` | đã đăng nhập — chỉ phiên của chính mình |
 | `POST` | `/api/v1/auth/change-password` | đã đăng nhập |
 | `GET` | `/api/v1/auth/oauth/{provider}/start` | công khai (redirect) |
 | `GET`\* | `/api/v1/auth/oauth/{provider}/callback` | công khai (redirect) |

@@ -5,16 +5,34 @@ import { userService } from "@/services/user.service";
 import { UserForm } from "./user-form";
 import { UserDeleteButton } from "./user-delete-button";
 import { UserStatusButton } from "./user-status-button";
+import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Quản lý người dùng" };
 export const dynamic = "force-dynamic";
 
-export default async function UsersPage() {
+/**
+ * Số dòng mỗi trang.
+ *
+ * 20 chứ không phải 50: danh sách này có nút Khoá và Xoá ở mỗi dòng, và trang
+ * càng dài thì càng dễ bấm nhầm dòng bên cạnh.
+ */
+const PER_PAGE = 20;
+
+export default async function UsersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cursor?: string }>;
+}) {
   // Lớp bảo vệ ở tầng trang. Server Action còn tự kiểm tra lại một lần nữa —
   // xem `actions.ts` để biết vì sao không thể chỉ dựa vào chỗ này.
   const currentUser = await requirePermission("user:read", "/users");
 
-  const [{ users }, total] = await Promise.all([userService.list(), userService.count()]);
+  const { cursor } = await searchParams;
+
+  const [{ users, nextCursor }, total] = await Promise.all([
+    userService.list({ cursor, take: PER_PAGE }),
+    userService.count(),
+  ]);
 
   return (
     <>
@@ -88,10 +106,48 @@ export default async function UsersPage() {
           </ul>
         )}
 
-        {total > users.length && (
-          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: 16 }}>
-            Đang hiển thị {users.length}/{total} người dùng. Thêm phân trang khi cần xem hết.
-          </p>
+        {/*
+          Phân trang kiểu CURSOR, không phải offset.
+          `OFFSET 10000` buộc Postgres đọc rồi vứt đi 10000 dòng ở mỗi lần lật
+          trang. Tệ hơn: danh sách này đang được sửa liên tục (thêm, khoá, xoá),
+          mà offset thì lệch ngay khi có dòng chèn vào giữa — người dùng lật
+          trang và thấy một bản ghi hai lần, hoặc bỏ sót một bản ghi.
+
+          Đổi lại, cursor không cho "Trang trước" miễn phí. Không sao: mỗi
+          trang là một URL riêng, nên nút Back của trình duyệt chính là "trang
+          trước" — hoạt động đúng, không cần code gì thêm.
+        */}
+        {(cursor || nextCursor) && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              marginTop: 20,
+              paddingTop: 16,
+              borderTop: "1px solid var(--border-color)",
+            }}
+          >
+            <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+              {users.length} / {total} người dùng
+            </span>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              {cursor && (
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/users">← Về đầu danh sách</Link>
+                </Button>
+              )}
+              {nextCursor && (
+                <Button asChild variant="outline" size="sm">
+                  <Link href={{ pathname: "/users", query: { cursor: nextCursor } }}>
+                    Trang sau →
+                  </Link>
+                </Button>
+              )}
+            </div>
+          </div>
         )}
       </section>
     </>
