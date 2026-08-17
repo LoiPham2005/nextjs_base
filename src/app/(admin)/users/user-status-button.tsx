@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { setUserStatusAction, unlockUserAction } from "./actions";
 import type { UserStatusInput } from "@/schemas/user.schema";
+import { Button } from "@/components/ui/button";
 
 export function UserStatusButton({
   id,
@@ -44,26 +45,26 @@ export function UserStatusButton({
   return (
     <div style={{ display: "flex", gap: 8 }}>
       {isLockedNow && (
-        <button
+        <Button
           type="button"
           onClick={unlock}
           disabled={isPending}
-          className="btn btn-secondary"
-          style={{ padding: "6px 12px", fontSize: "0.82rem" }}
+          variant="secondary"
+          size="sm"
           title="Đăng nhập sai quá nhiều lần — mở khoá sớm thay vì đợi tự hết hạn"
         >
           Mở khoá tạm
-        </button>
+        </Button>
       )}
-      <button
+      <Button
         type="button"
         onClick={toggleStatus}
         disabled={isPending}
-        className={status === "BANNED" ? "btn btn-secondary" : "btn btn-danger"}
-        style={{ padding: "6px 12px", fontSize: "0.82rem" }}
+        variant={status === "BANNED" ? "secondary" : "destructive"}
+        size="sm"
       >
         {isPending ? "Đang xử lý..." : status === "BANNED" ? "Mở khoá" : "Khoá"}
-      </button>
+      </Button>
     </div>
   );
 }

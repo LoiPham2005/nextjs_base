@@ -1,12 +1,21 @@
-import type { AuthFormState } from "./actions";
+import type { AuthFieldName, AuthFormState } from "./actions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export type Field = {
-  name: "identifier" | "email" | "password" | "fullName";
+  /**
+   * Dùng chung union với `AuthFormState.fieldErrors`. Nhờ vậy một ô không tồn
+   * tại trong schema sẽ bị TypeScript chặn ngay tại đây, thay vì lặng lẽ gửi
+   * lên rồi bị Zod strip mất — đúng lỗi đã làm hỏng đăng nhập trước đây.
+   */
+  name: AuthFieldName;
   label: string;
   type?: string;
   placeholder?: string;
   required?: boolean;
   autoComplete?: string;
+  /** Chú thích dưới ô, cho những trường tuỳ chọn cần giải thích thêm. */
+  hint?: string;
 };
 
 /**
@@ -36,40 +45,27 @@ export function AuthFields({
     <>
       {nextPath && <input type="hidden" name="next" value={nextPath} />}
 
-      {fields.map((field) => {
-        const errorId = `${field.name}-error`;
-        const fieldError = state.fieldErrors?.[field.name]?.[0];
+      {fields.map((field) => (
+        <div key={field.name}>
+          <label htmlFor={field.name} className="mb-1.5 block text-sm font-semibold text-content">
+            {field.label}
+          </label>
 
-        return (
-          <div key={field.name}>
-            <label
-              htmlFor={field.name}
-              style={{ display: "block", marginBottom: 6, fontSize: "0.88rem", fontWeight: 600 }}
-            >
-              {field.label}
-            </label>
-            <input
-              id={field.name}
-              name={field.name}
-              type={field.type ?? "text"}
-              placeholder={field.placeholder}
-              required={field.required}
-              autoComplete={field.autoComplete}
-              aria-invalid={fieldError ? true : undefined}
-              aria-describedby={fieldError ? errorId : undefined}
-              className="input-field"
-            />
-            {fieldError && (
-              <p
-                id={errorId}
-                style={{ color: "var(--danger-color)", fontSize: "0.82rem", marginTop: 4 }}
-              >
-                {fieldError}
-              </p>
-            )}
-          </div>
-        );
-      })}
+          {/* `Input` tự lo aria-invalid và aria-describedby — xem ghi chú trong
+              component. Trước đây phần nối trợ năng đó phải chép tay ở từng
+              form, và hai trong ba form đã quên. */}
+          <Input
+            id={field.name}
+            name={field.name}
+            type={field.type ?? "text"}
+            placeholder={field.placeholder}
+            required={field.required}
+            autoComplete={field.autoComplete}
+            error={state.fieldErrors?.[field.name]?.[0]}
+            hint={field.hint}
+          />
+        </div>
+      ))}
 
       {state.error && (
         <div className="alert alert-danger" role="alert">
@@ -77,9 +73,9 @@ export function AuthFields({
         </div>
       )}
 
-      <button type="submit" disabled={isPending} className="btn btn-primary">
+      <Button type="submit" disabled={isPending}>
         {isPending ? pendingLabel : submitLabel}
-      </button>
+      </Button>
     </>
   );
 }

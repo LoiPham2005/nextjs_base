@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { apiPath } from "@/lib/api/version";
+import { Button } from "@/components/ui/button";
 import { isProviderConfigured } from "@/lib/oauth/config";
 import { OAUTH_PROVIDERS, type OAuthProviderId } from "@/lib/oauth/types";
 
@@ -21,14 +22,13 @@ export function OAuthButtons({ next }: { next?: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
       {configured.map((provider) => (
-        <Link
-          key={provider}
-          href={`${apiPath(`/auth/oauth/${provider}/start`)}${next ? `?next=${encodeURIComponent(next)}` : ""}`}
-          className="btn btn-secondary"
-          style={{ width: "100%" }}
-        >
-          Tiếp tục với {LABELS[provider]}
-        </Link>
+        <Button key={provider} asChild variant="secondary" className="w-full">
+          <Link
+            href={`${apiPath(`/auth/oauth/${provider}/start`)}${next ? `?next=${encodeURIComponent(next)}` : ""}`}
+          >
+            Tiếp tục với {LABELS[provider]}
+          </Link>
+        </Button>
       ))}
 
       <div

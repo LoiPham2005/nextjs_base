@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
 
 /**
  * Error boundary cho toàn bộ route tree. Không có file này, một exception chưa
@@ -37,9 +38,9 @@ export default function Error({
           </p>
         )}
 
-        <button type="button" onClick={reset} className="btn btn-primary">
+        <Button type="button" onClick={reset}>
           Thử lại
-        </button>
+        </Button>
       </div>
     </main>
   );

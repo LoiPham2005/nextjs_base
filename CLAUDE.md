@@ -103,8 +103,20 @@ nhật vào README**:
   nghĩa là "không được tụt" — đừng hạ ngưỡng để CI xanh.
 - **`tsconfig.scripts.json`**: script Node ngoài Next (như `pnpm db:purge`) cần nó để stub
   `server-only`. Đừng đưa alias đó vào `tsconfig.json` gốc — làm vậy là gỡ chốt chặn cho cả app.
-- **`src/components/`** đang được dựng theo hướng Shadcn-style (`ui/`, `layout/`, `common/`) — chỉ
-  file nào **thực sự có nơi dùng** mới nên giữ, tránh tạo component rỗng "để sau".
+- **Giao diện đã chốt MỘT hệ: Shadcn-style trong `src/components/ui/`.** Trước đó dự án có hai hệ
+  song song — class thủ công (`.btn`, `.input-field`) ở `globals.css` và component Tailwind ở
+  `ui/`. Chính chỗ hai hệ chạm nhau đã đẻ ra hai bug thật: header trắng đè nền tối, và nút chữ
+  chàm trên nền chàm. Nay `.btn*`/`.input-field` đã bị xoá khỏi `globals.css`; **nút và ô nhập
+  luôn dùng `<Button>`/`<Input>`**. Class CSS chỉ còn giữ những thứ thuần trình bày, không có
+  trạng thái: `.card`, `.badge`, `.alert`, `.container`, `.form-grid`.
+- **`ui/` chỉ giữ component có nơi dùng thật.** Hiện có đúng `button.tsx` và `input.tsx`; 6 file
+  chưa ai dùng (avatar, badge, card, dialog, dropdown-menu, skeleton) đã bị xoá cùng 4 dependency
+  chết. Cần lại thì `npx shadcn add <tên>` — nhanh hơn và chuẩn hơn bản tự viết để đó.
+- **`(admin)/layout.tsx`** lo sidebar + `requireUser()` chung cho khu quản trị. ⚠️ Layout **không
+  phải ranh giới bảo mật** — Server Action không đi qua nó. Mỗi trang vẫn tự `requirePermission`
+  (mỗi trang cần quyền khác nhau), mỗi action vẫn tự kiểm quyền.
+- **`src/lib/cn.ts`** (đổi tên từ `utils.ts`) — chỉ chứa hàm `cn()`. Tên `utils` là bãi rác, đổi
+  tên để không ai nhét hàm không liên quan vào. `format.ts` đã bị xoá vì không nơi nào dùng.
 - **Chưa có backup database tự động** — self-host Postgres qua Docker Compose, VPS mất là mất data.
   Xem [docs/disaster-recovery.md](docs/disaster-recovery.md) và
   [docs/HUONG_DAN_CHON_CONG_NGHE_HA_TANG.md](docs/HUONG_DAN_CHON_CONG_NGHE_HA_TANG.md).

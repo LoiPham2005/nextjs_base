@@ -35,7 +35,7 @@ export default async function RolesPage() {
   const options = PERMISSIONS.map((key) => ({ key, description: PERMISSION_DESCRIPTIONS[key] }));
 
   return (
-    <main className="container">
+    <>
       <div style={{ marginBottom: 24 }}>
         <Link href="/users" style={{ fontSize: "0.9rem", color: "var(--text-muted)" }}>
           ← Quản lý người dùng
@@ -99,6 +99,6 @@ export default async function RolesPage() {
           />
         </section>
       ))}
-    </main>
+    </>
   );
 }

@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { updateRolePermissionsAction, type RoleFormState } from "./actions";
 import type { Permission } from "@/lib/permissions";
+import { Button } from "@/components/ui/button";
 
 const initialState: RoleFormState = {};
 
@@ -60,14 +61,9 @@ export function RolePermissionForm({
       )}
 
       {!disabled && (
-        <button
-          type="submit"
-          disabled={isPending}
-          className="btn btn-primary btn-sm"
-          style={{ marginTop: 12 }}
-        >
+        <Button type="submit" disabled={isPending} size="sm" className="mt-3">
           {isPending ? "Đang lưu…" : "Lưu phân quyền"}
-        </button>
+        </Button>
       )}
     </form>
   );

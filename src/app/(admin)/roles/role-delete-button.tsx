@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { deleteRoleAction } from "./actions";
+import { Button } from "@/components/ui/button";
 
 export function RoleDeleteButton({ roleKey, userCount }: { roleKey: string; userCount: number }) {
   const [isPending, startTransition] = useTransition();
@@ -28,14 +29,14 @@ export function RoleDeleteButton({ roleKey, userCount }: { roleKey: string; user
   };
 
   return (
-    <button
+    <Button
       type="button"
       onClick={handleDelete}
       disabled={isPending}
-      className="btn btn-danger"
-      style={{ padding: "6px 12px", fontSize: "0.82rem" }}
+      variant="destructive"
+      size="sm"
     >
       {isPending ? "Đang xoá..." : "Xoá"}
-    </button>
+    </Button>
   );
 }

@@ -17,7 +17,7 @@ export default async function UsersPage() {
   const [{ users }, total] = await Promise.all([userService.list(), userService.count()]);
 
   return (
-    <main className="container">
+    <>
       <div
         style={{
           marginBottom: 24,
@@ -94,6 +94,6 @@ export default async function UsersPage() {
           </p>
         )}
       </section>
-    </main>
+    </>
   );
 }

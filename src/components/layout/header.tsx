@@ -13,6 +13,9 @@ import { permissionService } from "@/services/permission.service";
  * — không chỗ nào đặt class `dark` lên `<html>` — nên header hiện màu trắng đè
  * lên nền tối của toàn trang.
  */
+/** Các trang trong khu quản trị. Union để `typedRoutes` bắt lỗi đường dẫn sai. */
+type AdminRoute = "/users" | "/roles";
+
 export async function Header() {
   const user = await getCurrentUser();
 
@@ -26,6 +29,8 @@ export async function Header() {
       ])
     : [false, false];
 
+  const adminEntry: AdminRoute | null = canSeeUsers ? "/users" : canSeeRoles ? "/roles" : null;
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-line bg-canvas/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
@@ -34,8 +39,17 @@ export async function Header() {
 
           <nav className="hidden items-center gap-1 md:flex">
             <NavLink href="/">Trang chủ</NavLink>
-            {canSeeUsers && <NavLink href="/users">Người dùng</NavLink>}
-            {canSeeRoles && <NavLink href="/roles">Vai trò</NavLink>}
+
+            {/*
+              MỘT lối vào khu quản trị, không liệt kê từng trang ở đây — việc đó
+              do sidebar trong `(admin)/layout.tsx` lo. Bày cả hai chỗ cùng một
+              danh sách chỉ tạo ra hai nơi phải sửa mỗi lần thêm trang.
+
+              Trỏ tới trang ĐẦU TIÊN người này thật sự vào được: một người chỉ
+              có `role:read` mà bị dẫn tới `/users` sẽ nhận 404 ngay ở cú bấm
+              đầu tiên.
+            */}
+            {adminEntry && <NavLink href={adminEntry}>Quản trị</NavLink>}
           </nav>
         </div>
 

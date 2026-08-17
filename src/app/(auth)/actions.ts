@@ -23,6 +23,16 @@ import {
 } from "@/services/auth.service";
 import { UserAlreadyExistsError } from "@/services/user.service";
 
+/**
+ * Tên các ô trong form xác thực.
+ *
+ * Union này là hợp đồng giữa ba nơi: `name=` của thẻ input, khoá lỗi Zod trả
+ * về, và khoá mà `AuthFields` dùng để tìm lỗi đem hiển thị. Giữ nó khớp với
+ * schema chính là thứ chặn lại lỗi cũ — form gửi `email` trong khi schema đòi
+ * `identifier`, khiến đăng nhập hỏng hoàn toàn mà không lớp nào bắt được.
+ */
+export type AuthFieldName = "identifier" | "email" | "username" | "fullName" | "password";
+
 export type AuthFormState = {
   error?: string;
   /**
@@ -33,7 +43,7 @@ export type AuthFormState = {
    * sang. Câu trả lời chính là toàn bộ phản hồi.
    */
   success?: string;
-  fieldErrors?: Partial<Record<"identifier" | "email" | "password" | "fullName", string[]>>;
+  fieldErrors?: Partial<Record<AuthFieldName, string[]>>;
 };
 
 async function getClientKey(scope: string): Promise<string> {

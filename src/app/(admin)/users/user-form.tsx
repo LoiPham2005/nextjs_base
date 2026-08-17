@@ -2,6 +2,8 @@
 
 import { useActionState, useRef, useEffect } from "react";
 import { createUserAction, type CreateUserState } from "./actions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 const initialState: CreateUserState = {};
 
@@ -22,48 +24,34 @@ export function UserForm() {
       style={{ display: "flex", flexDirection: "column", gap: 16 }}
     >
       <div className="form-grid">
-        <div>
-          <input
-            name="email"
-            type="email"
-            placeholder="Email (ví dụ: user@example.com)"
-            required
-            className="input-field"
-          />
-          {state.fieldErrors?.email && (
-            <p style={{ color: "var(--danger-color)", fontSize: "0.82rem", marginTop: 4 }}>
-              {state.fieldErrors.email[0]}
-            </p>
-          )}
-        </div>
+        <Input
+          id="new-user-email"
+          name="email"
+          type="email"
+          placeholder="Email (ví dụ: user@example.com)"
+          required
+          error={state.fieldErrors?.email?.[0]}
+        />
 
-        <div>
-          <input name="fullName" placeholder="Họ và tên (không bắt buộc)" className="input-field" />
-          {state.fieldErrors?.fullName && (
-            <p style={{ color: "var(--danger-color)", fontSize: "0.82rem", marginTop: 4 }}>
-              {state.fieldErrors.fullName[0]}
-            </p>
-          )}
-        </div>
+        <Input
+          id="new-user-fullname"
+          name="fullName"
+          placeholder="Họ và tên (không bắt buộc)"
+          error={state.fieldErrors?.fullName?.[0]}
+        />
 
-        <div>
-          <input
-            name="username"
-            placeholder="Tên đăng nhập (không bắt buộc)"
-            className="input-field"
-          />
-          {state.fieldErrors?.username && (
-            <p style={{ color: "var(--danger-color)", fontSize: "0.82rem", marginTop: 4 }}>
-              {state.fieldErrors.username[0]}
-            </p>
-          )}
-        </div>
+        <Input
+          id="new-user-username"
+          name="username"
+          placeholder="Tên đăng nhập (không bắt buộc)"
+          error={state.fieldErrors?.username?.[0]}
+        />
       </div>
 
       <div className="form-actions">
-        <button type="submit" disabled={isPending} className="btn btn-primary">
+        <Button type="submit" disabled={isPending}>
           {isPending ? "Đang thêm..." : "+ Thêm người dùng"}
-        </button>
+        </Button>
       </div>
 
       {state.error && (

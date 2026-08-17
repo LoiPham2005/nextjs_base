@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 export default function NotFound() {
   return (
@@ -13,9 +14,9 @@ export default function NotFound() {
         <p style={{ color: "var(--text-muted)", marginBottom: 24 }}>
           Đường dẫn không tồn tại, hoặc bạn không có quyền truy cập.
         </p>
-        <Link href="/" className="btn btn-primary">
-          Về trang chủ
-        </Link>
+        <Button asChild>
+          <Link href="/">Về trang chủ</Link>
+        </Button>
       </div>
     </main>
   );

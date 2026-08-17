@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { deleteUserAction } from "./actions";
+import { Button } from "@/components/ui/button";
 
 export function UserDeleteButton({ id, email }: { id: string; email: string }) {
   const [isPending, startTransition] = useTransition();
@@ -21,14 +22,14 @@ export function UserDeleteButton({ id, email }: { id: string; email: string }) {
   };
 
   return (
-    <button
+    <Button
       type="button"
       onClick={handleDelete}
       disabled={isPending}
-      className="btn btn-danger"
-      style={{ padding: "6px 12px", fontSize: "0.82rem" }}
+      variant="destructive"
+      size="sm"
     >
       {isPending ? "Đang xoá..." : "Xoá"}
-    </button>
+    </Button>
   );
 }

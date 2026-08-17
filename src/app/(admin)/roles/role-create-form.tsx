@@ -2,6 +2,8 @@
 
 import { useActionState, useEffect, useRef } from "react";
 import { createRoleAction, type RoleFormState } from "./actions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 const initialState: RoleFormState = {};
 
@@ -20,46 +22,35 @@ export function RoleCreateForm() {
       style={{ display: "flex", flexDirection: "column", gap: 12 }}
     >
       <div className="form-grid">
-        <div>
-          <input
-            name="key"
-            placeholder="KHOA_VAI_TRO (ví dụ: KE_TOAN)"
-            required
-            className="input-field"
-          />
-          {state.fieldErrors?.key && (
-            <p style={{ color: "var(--danger-color)", fontSize: "0.82rem", marginTop: 4 }}>
-              {state.fieldErrors.key[0]}
-            </p>
-          )}
-          <p style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: 4 }}>
-            Không đổi được sau khi tạo — khoá này nằm trong các phiên đăng nhập đang chạy.
-          </p>
-        </div>
+        <Input
+          id="new-role-key"
+          name="key"
+          placeholder="KHOA_VAI_TRO (ví dụ: KE_TOAN)"
+          required
+          error={state.fieldErrors?.key?.[0]}
+          hint="Không đổi được sau khi tạo — khoá này nằm trong các phiên đăng nhập đang chạy."
+        />
 
-        <div>
-          <input
-            name="name"
-            placeholder="Tên hiển thị (ví dụ: Kế toán)"
-            required
-            className="input-field"
-          />
-          {state.fieldErrors?.name && (
-            <p style={{ color: "var(--danger-color)", fontSize: "0.82rem", marginTop: 4 }}>
-              {state.fieldErrors.name[0]}
-            </p>
-          )}
-        </div>
+        <Input
+          id="new-role-name"
+          name="name"
+          placeholder="Tên hiển thị (ví dụ: Kế toán)"
+          required
+          error={state.fieldErrors?.name?.[0]}
+        />
 
-        <div>
-          <input name="description" placeholder="Mô tả (không bắt buộc)" className="input-field" />
-        </div>
+        <Input
+          id="new-role-description"
+          name="description"
+          placeholder="Mô tả (không bắt buộc)"
+          error={state.fieldErrors?.description?.[0]}
+        />
       </div>
 
       <div className="form-actions">
-        <button type="submit" disabled={isPending} className="btn btn-primary">
+        <Button type="submit" disabled={isPending}>
           {isPending ? "Đang tạo…" : "+ Tạo vai trò"}
-        </button>
+        </Button>
       </div>
 
       {state.error && (
