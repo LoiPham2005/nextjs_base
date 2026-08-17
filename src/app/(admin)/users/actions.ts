@@ -10,6 +10,7 @@ import {
   SelfDeletionError,
   SelfStatusChangeError,
   UserAlreadyExistsError,
+  UsernameAlreadyExistsError,
   UserNotFoundError,
 } from "@/services/user.service";
 
@@ -34,7 +35,13 @@ async function denyIfNotAdmin(): Promise<{ error: string } | null> {
 
 export type CreateUserState = {
   error?: string;
-  fieldErrors?: Partial<Record<"email" | "name" | "password" | "role", string[]>>;
+  /**
+   * Khoá phải trùng tên trường trong `createUserSchema` — đó vừa là thứ
+   * `z.flattenError` trả về, vừa là `name=` của các ô trong form. Union cũ còn
+   * ghi `name`/`role`, hai trường không tồn tại trong schema, nên lỗi trả về
+   * không bao giờ tìm được ô để hiển thị.
+   */
+  fieldErrors?: Partial<Record<"email" | "username" | "fullName" | "password", string[]>>;
 };
 
 export async function createUserAction(
@@ -44,11 +51,18 @@ export async function createUserAction(
   const denied = await denyIfNotAdmin();
   if (denied) return denied;
 
-  // `role` cố ý KHÔNG đọc từ formData. Nếu đọc, bất kỳ ai gửi được form cũng
-  // tự phong mình làm ADMIN — leo thang đặc quyền chỉ bằng một field ẩn.
+  // `roleKey` cố ý KHÔNG đọc từ formData. Nếu đọc, bất kỳ ai gửi được form
+  // cũng tự phong mình làm ADMIN — leo thang đặc quyền chỉ bằng một field ẩn.
+  // Muốn gán vai trò thì đi qua REST API, nơi người gọi được xác thực bằng
+  // token chứ không phải bằng nội dung form.
+  //
+  // Tên trường phải là `fullName`, không phải `name`: Zod strip im lặng khoá
+  // lạ, nên gửi sai tên không hề báo lỗi — parse vẫn thành công, chỉ có dữ
+  // liệu người dùng vừa nhập là biến mất trước khi tới database.
   const parsed = createUserSchema.safeParse({
     email: formData.get("email"),
-    name: formData.get("name") || undefined,
+    username: formData.get("username") || undefined,
+    fullName: formData.get("fullName") || undefined,
   });
 
   if (!parsed.success) {
@@ -60,6 +74,12 @@ export async function createUserAction(
   } catch (error) {
     if (error instanceof UserAlreadyExistsError) {
       return { error: error.message };
+    }
+    // Tên đăng nhập là ô mới trên form, nên trùng username giờ là kết cục có
+    // thật. Không bắt riêng thì nó rơi vào nhánh "lỗi không xác định" và admin
+    // chỉ nhận được một câu chung chung, không biết phải sửa ô nào.
+    if (error instanceof UsernameAlreadyExistsError) {
+      return { fieldErrors: { username: [error.message] } };
     }
     logger.error("Create user failed", error, { email: parsed.data.email });
     return { error: "Không thể tạo người dùng lúc này. Vui lòng thử lại." };

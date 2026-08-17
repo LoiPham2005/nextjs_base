@@ -300,6 +300,39 @@ a:hover {
   color: var(--danger-color);
 }
 
+.alert-success {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: var(--success-color);
+}
+
+/* Bảng tick quyền trên trang /roles. */
+.permission-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.permission-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.permission-item:has(input:disabled) {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.permission-item input {
+  margin-top: 3px;
+}
+
 .spinner {
   width: 32px;
   height: 32px;

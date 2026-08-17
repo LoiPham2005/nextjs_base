@@ -19,7 +19,7 @@ const refreshSchema = z.object({
  */
 export async function POST(request: Request) {
   try {
-    enforceRateLimit(request, "api:refresh", RATE_LIMITS.refresh);
+    await enforceRateLimit(request, "api:refresh", RATE_LIMITS.refresh);
 
     const { refreshToken } = await parseJsonBody(request, refreshSchema);
 
@@ -49,6 +49,6 @@ export async function POST(request: Request) {
       refreshExpiresAt: rotated.refresh.expiresAt.toISOString(),
     });
   } catch (error) {
-    return handleApiError(error, { route: "POST /api/v1/auth/refresh" });
+    return handleApiError(error, { route: "POST /api/v1/auth/refresh", request });
   }
 }

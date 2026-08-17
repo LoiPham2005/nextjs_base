@@ -38,11 +38,25 @@ export function UserForm() {
         </div>
 
         <div>
+          <input name="fullName" placeholder="Họ và tên (không bắt buộc)" className="input-field" />
+          {state.fieldErrors?.fullName && (
+            <p style={{ color: "var(--danger-color)", fontSize: "0.82rem", marginTop: 4 }}>
+              {state.fieldErrors.fullName[0]}
+            </p>
+          )}
+        </div>
+
+        <div>
           <input
-            name="name"
-            placeholder="Tên người dùng (không bắt buộc)"
+            name="username"
+            placeholder="Tên đăng nhập (không bắt buộc)"
             className="input-field"
           />
+          {state.fieldErrors?.username && (
+            <p style={{ color: "var(--danger-color)", fontSize: "0.82rem", marginTop: 4 }}>
+              {state.fieldErrors.username[0]}
+            </p>
+          )}
         </div>
 
         <button type="submit" disabled={isPending} className="btn btn-primary">

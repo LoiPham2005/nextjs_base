@@ -16,6 +16,6 @@ export async function POST(request: Request, { params }: RouteContext) {
 
     return apiOk({ user });
   } catch (error) {
-    return handleApiError(error, { route: "POST /api/v1/users/[id]/unlock" });
+    return handleApiError(error, { route: "POST /api/v1/users/[id]/unlock", request });
   }
 }

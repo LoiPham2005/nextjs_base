@@ -31,7 +31,7 @@ export async function GET(request: Request) {
 
     return apiOk({ users, pagination: { perPage, nextCursor } });
   } catch (error) {
-    return handleApiError(error, { route: "GET /api/v1/users" });
+    return handleApiError(error, { route: "GET /api/v1/users", request });
   }
 }
 
@@ -50,6 +50,6 @@ export async function POST(request: Request) {
 
     return apiOk({ user }, 201);
   } catch (error) {
-    return handleApiError(error, { route: "POST /api/v1/users" });
+    return handleApiError(error, { route: "POST /api/v1/users", request });
   }
 }

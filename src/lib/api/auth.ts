@@ -87,13 +87,13 @@ export function clientIp(request: Request): string {
  * Giới hạn tần suất theo IP; ném ApiError 429 khi vượt ngưỡng.
  * Dùng cho các endpoint không cần đăng nhập (login, register, refresh).
  */
-export function enforceRateLimit(
+export async function enforceRateLimit(
   request: Request,
   scope: string,
   options: { limit: number; windowSeconds: number },
-): string {
+): Promise<string> {
   const key = `${scope}:${clientIp(request)}`;
-  const result = rateLimit(key, options);
+  const result = await rateLimit(key, options);
 
   if (!result.success) throw apiErrors.rateLimited(result.retryAfterSeconds);
 

@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    enforceRateLimit(request, "api:register", RATE_LIMITS.register);
+    await enforceRateLimit(request, "api:register", RATE_LIMITS.register);
 
     const body = await parseJsonBody(request, registerSchema);
 
@@ -22,6 +22,6 @@ export async function POST(request: Request) {
 
     return apiOk({ user, ...tokens }, 201);
   } catch (error) {
-    return handleApiError(error, { route: "POST /api/v1/auth/register" });
+    return handleApiError(error, { route: "POST /api/v1/auth/register", request });
   }
 }

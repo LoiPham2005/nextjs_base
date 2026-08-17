@@ -15,6 +15,6 @@ export async function GET(request: Request) {
 
     return apiOk({ user });
   } catch (error) {
-    return handleApiError(error, { route: "GET /api/v1/auth/me" });
+    return handleApiError(error, { route: "GET /api/v1/auth/me", request });
   }
 }

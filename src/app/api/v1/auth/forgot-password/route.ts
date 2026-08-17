@@ -27,7 +27,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: Request) {
   try {
-    enforceRateLimit(request, "api:forgot-password", RATE_LIMITS.passwordResetRequest);
+    await enforceRateLimit(request, "api:forgot-password", RATE_LIMITS.passwordResetRequest);
 
     const body = await parseJsonBody(request, forgotPasswordSchema);
 
@@ -43,6 +43,6 @@ export async function POST(request: Request) {
   } catch (error) {
     // Chỉ còn lỗi rate limit và lỗi validate lọt tới đây — cả hai đều không
     // tiết lộ email có tồn tại hay không.
-    return handleApiError(error, { route: "POST /api/v1/auth/forgot-password" });
+    return handleApiError(error, { route: "POST /api/v1/auth/forgot-password", request });
   }
 }

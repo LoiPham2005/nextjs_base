@@ -56,6 +56,9 @@ services:
       <<: *database-url
       NODE_ENV: production
       PORT: 3000
+      # Rate limit dùng chung giữa các instance. Cùng một Redis với realtime —
+      # khoá của rate limit mang tiền tố riêng nên hai bên không giẫm lên nhau.
+      REDIS_URL: redis://redis:6379
     ports:
       - "${APP_PORT:-3000}:3000"
     depends_on:
@@ -63,6 +66,11 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      # Chỉ `started`, không phải `healthy`: rate limit fail-open khi Redis
+      # chưa sẵn sàng, nên web không có lý do gì phải đợi. Bắt đợi ở đây chỉ
+      # làm chậm khởi động mà không đổi lại điều gì.
+      redis:
+        condition: service_started
     healthcheck:
       test:
         [

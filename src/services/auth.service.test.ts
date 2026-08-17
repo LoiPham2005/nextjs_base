@@ -18,8 +18,27 @@ vi.mock("@/lib/crypto", () => ({
   },
 }));
 
+// Luồng quên mật khẩu đi qua ba cộng tác viên này. Mock cả ba để bài test nói
+// đúng một chuyện: AuthService đã hỏi ai, bằng dữ liệu gì.
+vi.mock("./user.service", () => ({
+  userService: { findByEmail: vi.fn() },
+}));
+
+vi.mock("./verification.service", () => ({
+  verificationService: {
+    issue: vi.fn().mockResolvedValue({ token: "tok", expiresAt: new Date() }),
+  },
+}));
+
+vi.mock("@/lib/emails", () => ({
+  sendPasswordResetEmail: vi.fn().mockResolvedValue(undefined),
+  sendVerificationEmail: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { prisma } from "@/lib/prisma";
 import { CryptoUtils } from "@/lib/crypto";
+import { userService } from "./user.service";
+import { sendPasswordResetEmail } from "@/lib/emails";
 
 /**
  * `findUnique` ở đây được gọi kèm `select` lồng, nên kiểu Prisma sinh ra không
@@ -240,5 +259,55 @@ describe("AuthService — nâng cấp hash mật khẩu khi đăng nhập", () =
     });
 
     expect(user.id).toBe("u-1");
+  });
+});
+
+/**
+ * Luồng quên mật khẩu là chỗ khó phát hiện lỗi nhất trong toàn bộ hệ thống:
+ * endpoint luôn trả 200 dù có tìm thấy tài khoản hay không — cố ý, để không ai
+ * dò được danh sách người dùng. Cái giá của thiết kế đó là mọi sai sót bên
+ * trong đều biến mất không dấu vết. Vì vậy phải khẳng định ở tầng service.
+ */
+describe("AuthService.requestPasswordReset", () => {
+  const service = new AuthService();
+
+  const found = {
+    id: "u-1",
+    email: "user@example.com",
+    username: "user",
+    fullName: "User",
+    role: "USER",
+    roleName: "Người dùng",
+    emailVerifiedAt: null,
+    status: "ACTIVE" as const,
+    lockedUntil: null,
+    createdAt: new Date("2026-01-01"),
+    updatedAt: new Date("2026-01-01"),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("tra cứu qua userService nên email viết hoa vẫn tìm thấy tài khoản", async () => {
+    vi.mocked(userService.findByEmail).mockResolvedValue(found);
+
+    await service.requestPasswordReset("User@Example.COM");
+
+    // Điểm mấu chốt: việc chuẩn hoá (và cả lọc tài khoản đã xoá mềm) do
+    // userService giữ. Bản cũ tự viết `where: { email }` với chuỗi thô, nên
+    // gõ hoa một chữ là không dòng nào khớp — và không ai biết.
+    expect(userService.findByEmail).toHaveBeenCalledWith("User@Example.COM");
+    expect(sendPasswordResetEmail).toHaveBeenCalledWith("user@example.com", "tok");
+  });
+
+  it("im lặng khi email không có tài khoản — không gửi thư, không ném lỗi", async () => {
+    vi.mocked(userService.findByEmail).mockResolvedValue(null);
+
+    await expect(
+      service.requestPasswordReset("khong-ton-tai@example.com"),
+    ).resolves.toBeUndefined();
+
+    expect(sendPasswordResetEmail).not.toHaveBeenCalled();
   });
 });

@@ -15,10 +15,10 @@ function requestWith(headers: Record<string, string> = {}) {
   return new Request("http://localhost/api/v1/users", { headers });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   cookieStore.get.mockReturnValue(undefined);
-  __clearRateLimits();
+  await __clearRateLimits();
 });
 
 describe("getApiSession", () => {
@@ -101,28 +101,28 @@ describe("clientIp", () => {
 });
 
 describe("enforceRateLimit", () => {
-  it("ném ApiError 429 khi vượt ngưỡng", () => {
+  it("ném ApiError 429 khi vượt ngưỡng", async () => {
     const request = requestWith({ "x-forwarded-for": "1.1.1.1" });
     const options = { limit: 2, windowSeconds: 60 };
 
-    enforceRateLimit(request, "test", options);
-    enforceRateLimit(request, "test", options);
+    await enforceRateLimit(request, "test", options);
+    await enforceRateLimit(request, "test", options);
 
-    expect(() => enforceRateLimit(request, "test", options)).toThrowError(ApiError);
-    try {
-      enforceRateLimit(request, "test", options);
-    } catch (error) {
-      expect(error).toMatchObject({ status: 429, code: "RATE_LIMITED" });
-    }
+    await expect(enforceRateLimit(request, "test", options)).rejects.toThrowError(ApiError);
+    await expect(enforceRateLimit(request, "test", options)).rejects.toMatchObject({
+      status: 429,
+      code: "RATE_LIMITED",
+    });
   });
 
-  it("đếm riêng theo IP", () => {
+  it("đếm riêng theo IP", async () => {
     const options = { limit: 1, windowSeconds: 60 };
 
-    enforceRateLimit(requestWith({ "x-forwarded-for": "1.1.1.1" }), "test", options);
+    await enforceRateLimit(requestWith({ "x-forwarded-for": "1.1.1.1" }), "test", options);
 
-    expect(() =>
+    // IP khác thì có bộ đếm riêng, nên vẫn qua được dù IP kia đã chạm ngưỡng.
+    await expect(
       enforceRateLimit(requestWith({ "x-forwarded-for": "2.2.2.2" }), "test", options),
-    ).not.toThrow();
+    ).resolves.toBeTypeOf("string");
   });
 });

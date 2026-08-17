@@ -1,6 +1,6 @@
 .PHONY: help setup install dev build start check lint lint-fix typecheck test test-watch \
         test-coverage format format-check \
-        db-generate db-migrate db-deploy db-studio db-seed db-seed-dev db-seed-prod db-reset \
+        db-generate db-migrate db-deploy db-studio db-seed db-seed-dev db-seed-prod db-reset db-purge \
         docker-build docker-up docker-down docker-logs docker-ps \
         realtime docker-deploy docker-size docker-clean \
         vps-deploy vps-logs vps-status vps-files \
@@ -35,6 +35,7 @@ help:
 	@echo "  make db-seed-dev     - Nạp dữ liệu mẫu"
 	@echo "  make db-seed-prod    - Chỉ tạo tài khoản admin nền"
 	@echo "  make db-reset        - XOÁ SẠCH database rồi tạo lại"
+	@echo "  make db-purge        - Dọn refresh/verification token đã hết hạn"
 	@echo ""
 	@echo "--- DEPLOY: DOCKER ---"
 	@echo "  make docker-build    - Build image"
@@ -140,6 +141,9 @@ db-seed-prod:
 db-reset:
 	pnpm db:reset
 
+db-purge:
+	pnpm db:purge
+
 docker-build:
 	docker compose build
 
@@ -227,5 +231,10 @@ vps-files:
 	@echo ""
 	@echo "  sudo cp deploy/Caddyfile /etc/caddy/Caddyfile   # đổi example.com"
 	@echo "  sudo systemctl reload caddy"
+	@echo ""
+	@echo "  # Dọn token hết hạn hằng ngày — hai bảng token chỉ tăng nếu thiếu bước này:"
+	@echo "  sudo cp deploy/nextjs-base-purge.service deploy/nextjs-base-purge.timer /etc/systemd/system/"
+	@echo "  sudo systemctl daemon-reload"
+	@echo "  sudo systemctl enable --now nextjs-base-purge.timer"
 	@echo ""
 	@echo "VPS đã chạy nginx? Viết server block trỏ 127.0.0.1:3000, nhớ ghi đè X-Forwarded-For."

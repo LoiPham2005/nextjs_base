@@ -146,7 +146,20 @@ export class UserService {
     }
   }
 
-  async update(id: string, input: UpdateUserInput): Promise<PublicUser> {
+  /**
+   * @param actorId Người đang thực hiện thao tác, hoặc `null` nếu là tiến
+   * trình hệ thống (seed, cron, script quản trị).
+   *
+   * Bắt buộc truyền, cùng lý do với `delete()`: luật "không tự đổi vai trò của
+   * chính mình" là luật nghiệp vụ, nên nó phải sống ở đây thay vì được chép
+   * lại ở từng cửa vào. Không có luật này thì quản trị viên cuối cùng tự hạ
+   * quyền mình là khoá cửa cả hệ thống — và không còn ai đủ quyền để mở lại.
+   */
+  async update(id: string, input: UpdateUserInput, actorId: string | null): Promise<PublicUser> {
+    if (input.roleKey !== undefined && actorId !== null && actorId === id) {
+      throw new SelfRoleChangeError();
+    }
+
     const roleId = input.roleKey ? await this.resolveRoleId(input.roleKey) : undefined;
 
     try {
@@ -382,6 +395,13 @@ export class SelfStatusChangeError extends Error {
   constructor() {
     super("Bạn không thể tự khoá/mở khoá tài khoản đang đăng nhập");
     this.name = "SelfStatusChangeError";
+  }
+}
+
+export class SelfRoleChangeError extends Error {
+  constructor() {
+    super("Bạn không thể tự đổi vai trò của tài khoản đang đăng nhập");
+    this.name = "SelfRoleChangeError";
   }
 }
 

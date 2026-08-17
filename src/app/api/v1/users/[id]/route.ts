@@ -1,6 +1,7 @@
 import { requireApiPermission, requireApiUser } from "@/lib/api/auth";
 import { permissionService } from "@/services/permission.service";
-import { apiErrors, apiOk, handleApiError } from "@/lib/api/response";
+import { apiErrors, apiOk, handleApiError, parseJsonBody } from "@/lib/api/response";
+import { updateUserSchema } from "@/schemas/user.schema";
 import { userService } from "@/services/user.service";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,53 @@ export async function GET(request: Request, { params }: RouteContext) {
 
     return apiOk({ user });
   } catch (error) {
-    return handleApiError(error, { route: "GET /api/v1/users/[id]" });
+    return handleApiError(error, { route: "GET /api/v1/users/[id]", request });
+  }
+}
+
+/**
+ * Sửa hồ sơ người dùng.
+ *
+ * ---
+ * HAI MỨC QUYỀN TRONG CÙNG MỘT ENDPOINT
+ *
+ * Sửa hồ sơ của CHÍNH MÌNH chỉ cần `profile:update:own`; sửa của người khác
+ * cần `user:update`. Gộp vào một endpoint thay vì tách `/me` riêng để client
+ * chỉ phải viết một hàm.
+ *
+ * ⚠️ NHƯNG `roleKey` thì KHÔNG đi theo luật đó. Nó luôn đòi `user:update`, kể
+ * cả khi người gọi đang sửa chính mình. Nếu không, bất kỳ ai có
+ * `profile:update:own` — tức là mọi người dùng — đều tự phong mình làm ADMIN
+ * bằng một field trong body. Đây là đường leo thang đặc quyền kinh điển của
+ * các endpoint "sửa hồ sơ".
+ *
+ * Luật "không tự đổi vai trò của chính mình" nằm ở service, không nằm đây.
+ */
+export async function PATCH(request: Request, { params }: RouteContext) {
+  try {
+    const { id } = await params;
+    const session = await requireApiUser(request);
+
+    const body = await parseJsonBody(request, updateUserSchema);
+
+    const allowed = await permissionService.canActOnResource(session.role, id, session.sub, {
+      any: "user:update",
+      own: "profile:update:own",
+    });
+
+    if (!allowed) throw apiErrors.forbidden();
+
+    // Kiểm tra riêng và kiểm tra SAU, chỉ khi body thật sự đụng tới vai trò.
+    // Đặt trước sẽ chặn cả những request chỉ đổi tên hiển thị.
+    if (body.roleKey !== undefined && !(await permissionService.can(session.role, "user:update"))) {
+      throw apiErrors.forbidden("Bạn không có quyền đổi vai trò");
+    }
+
+    const user = await userService.update(id, body, session.sub);
+
+    return apiOk({ user });
+  } catch (error) {
+    return handleApiError(error, { route: "PATCH /api/v1/users/[id]", request });
   }
 }
 
@@ -47,6 +94,6 @@ export async function DELETE(request: Request, { params }: RouteContext) {
 
     return apiOk({ id });
   } catch (error) {
-    return handleApiError(error, { route: "DELETE /api/v1/users/[id]" });
+    return handleApiError(error, { route: "DELETE /api/v1/users/[id]", request });
   }
 }

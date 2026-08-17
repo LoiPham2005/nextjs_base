@@ -19,7 +19,11 @@ export async function POST(request: Request) {
   try {
     const session = await requireApiUser(request);
 
-    enforceRateLimit(request, "api:verify-email-request", RATE_LIMITS.emailVerificationRequest);
+    await enforceRateLimit(
+      request,
+      "api:verify-email-request",
+      RATE_LIMITS.emailVerificationRequest,
+    );
 
     await authService.sendEmailVerification(session.sub);
 
@@ -27,6 +31,6 @@ export async function POST(request: Request) {
 
     return apiOk({ message: "Đã gửi email xác thực nếu địa chỉ chưa được xác thực." });
   } catch (error) {
-    return handleApiError(error, { route: "POST /api/v1/auth/verify-email/request" });
+    return handleApiError(error, { route: "POST /api/v1/auth/verify-email/request", request });
   }
 }

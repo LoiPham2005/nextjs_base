@@ -29,6 +29,6 @@ export async function POST(request: Request) {
     // ACCESS_TOKEN_TTL_MINUTES. Client phải tự xoá token khỏi bộ nhớ.
     return apiOk({ revoked: refreshToken ? 1 : 0 });
   } catch (error) {
-    return handleApiError(error, { route: "POST /api/v1/auth/logout" });
+    return handleApiError(error, { route: "POST /api/v1/auth/logout", request });
   }
 }

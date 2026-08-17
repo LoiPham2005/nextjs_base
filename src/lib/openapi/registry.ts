@@ -13,7 +13,13 @@ import {
   changePasswordSchema,
   verifyEmailSchema,
 } from "@/schemas/auth.schema";
-import { createUserSchema, updateUserStatusSchema, userSchema } from "@/schemas/user.schema";
+import {
+  createUserSchema,
+  updateUserSchema,
+  updateUserStatusSchema,
+  userSchema,
+} from "@/schemas/user.schema";
+import { createRoleSchema, updateRoleSchema } from "@/schemas/role.schema";
 
 /**
  * Đăng ký OpenAPI cho toàn bộ REST API mobile (`/api/v1/**`).
@@ -245,6 +251,24 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: "patch",
+  path: "/users/{id}",
+  tags: ["Users"],
+  security: [{ [bearerAuth.name]: [] }],
+  summary:
+    "Sửa hồ sơ — chính mình cần profile:update:own, sửa người khác cần user:update. " +
+    "Riêng roleKey LUÔN đòi user:update, kể cả khi đang sửa chính mình.",
+  request: {
+    ...userIdParam,
+    body: { content: { "application/json": { schema: updateUserSchema } } },
+  },
+  responses: {
+    ...okResponse(z.object({ user: userSchema })),
+    ...errorResponses(401, 403, 404, 409, 422),
+  },
+});
+
+registry.registerPath({
   method: "delete",
   path: "/users/{id}",
   tags: ["Users"],
@@ -278,6 +302,101 @@ registry.registerPath({
   summary: "Mở khoá sớm — xoá lockedUntil do brute-force thay vì đợi tự hết hạn",
   request: userIdParam,
   responses: { ...okResponse(z.object({ user: userSchema })), ...errorResponses(401, 403, 404) },
+});
+
+// --- Roles & phân quyền ---------------------------------------------------
+
+/**
+ * Hình dạng vai trò trả ra ngoài.
+ *
+ * Viết riêng thay vì suy ra từ `createRoleSchema`: schema đầu vào và dữ liệu
+ * đầu ra khác nhau thật (`isSystem`, `userCount` chỉ có ở đầu ra), gộp lại là
+ * tài liệu nói sai.
+ */
+const roleSchema = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  isSystem: z.boolean(),
+  permissions: z.array(z.string()),
+  userCount: z.number(),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/roles",
+  tags: ["Roles"],
+  security: [{ [bearerAuth.name]: [] }],
+  summary:
+    "Danh sách vai trò kèm bảng phân quyền, VÀ danh mục quyền tồn tại. " +
+    "Danh mục đến từ code (src/lib/permissions.ts), không phải database.",
+  responses: {
+    ...okResponse(
+      z.object({
+        roles: z.array(roleSchema),
+        permissions: z.array(z.object({ key: z.string(), description: z.string() })),
+      }),
+    ),
+    ...errorResponses(401, 403),
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/roles",
+  tags: ["Roles"],
+  security: [{ [bearerAuth.name]: [] }],
+  summary: "Tạo vai trò mới — key không đổi được sau khi tạo",
+  request: { body: { content: { "application/json": { schema: createRoleSchema } } } },
+  responses: {
+    ...okResponse(z.object({ role: roleSchema }), "Tạo thành công"),
+    ...errorResponses(401, 403, 409, 422),
+  },
+});
+
+const roleKeyParam = { params: z.object({ key: z.string() }) };
+
+registry.registerPath({
+  method: "get",
+  path: "/roles/{key}",
+  tags: ["Roles"],
+  security: [{ [bearerAuth.name]: [] }],
+  summary: "Chi tiết một vai trò",
+  request: roleKeyParam,
+  responses: { ...okResponse(z.object({ role: roleSchema })), ...errorResponses(401, 403, 404) },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/roles/{key}",
+  tags: ["Roles"],
+  security: [{ [bearerAuth.name]: [] }],
+  summary:
+    "Đổi tên/mô tả và/hoặc thay TOÀN BỘ danh sách quyền. " +
+    "`permissions` là thay thế, không phải thêm vào — gửi thiếu là gỡ mất.",
+  request: {
+    ...roleKeyParam,
+    body: { content: { "application/json": { schema: updateRoleSchema } } },
+  },
+  responses: {
+    ...okResponse(z.object({ role: roleSchema })),
+    ...errorResponses(401, 403, 404, 422),
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/roles/{key}",
+  tags: ["Roles"],
+  security: [{ [bearerAuth.name]: [] }],
+  summary: "Xoá vai trò — không xoá được vai trò hệ thống hoặc vai trò còn người dùng",
+  request: roleKeyParam,
+  responses: {
+    ...okResponse(z.object({ key: z.string() })),
+    ...errorResponses(401, 403, 404, 409),
+  },
 });
 
 export function getOpenApiDocument() {

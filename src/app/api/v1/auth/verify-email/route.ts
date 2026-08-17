@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: Request) {
   try {
-    enforceRateLimit(request, "api:verify-email", RATE_LIMITS.passwordChange);
+    await enforceRateLimit(request, "api:verify-email", RATE_LIMITS.passwordChange);
 
     const body = await parseJsonBody(request, verifyEmailSchema);
     const user = await authService.verifyEmail(body.token);
@@ -25,6 +25,6 @@ export async function POST(request: Request) {
 
     return apiOk({ user });
   } catch (error) {
-    return handleApiError(error, { route: "POST /api/v1/auth/verify-email" });
+    return handleApiError(error, { route: "POST /api/v1/auth/verify-email", request });
   }
 }

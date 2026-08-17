@@ -15,6 +15,15 @@ Documentation=https://nextjs.org/docs/app/api-reference/config/next-config-js/ou
 After=network-online.target postgresql.service
 Wants=network-online.target
 
+# Dừng hẳn nếu crash liên tục, thay vì quay vòng vô tận che mất lỗi thật.
+#
+# ⚠️ Hai khoá này phải nằm ở [Unit], KHÔNG phải [Service] — systemd đã chuyển
+# chúng sang đây từ bản 229. Đặt nhầm chỗ thì systemd chỉ ghi "Unknown key
+# name" vào log rồi bỏ qua: giới hạn khởi động lại mất tác dụng hoàn toàn mà
+# unit vẫn nạp bình thường, nên không có gì báo cho bạn biết.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
 [Service]
 Type=simple
 User=deploy
@@ -37,9 +46,6 @@ ExecStart=/usr/bin/node .next/standalone/server.js
 
 Restart=always
 RestartSec=5
-# Dừng hẳn nếu crash liên tục, thay vì quay vòng vô tận che mất lỗi thật.
-StartLimitBurst=5
-StartLimitIntervalSec=60
 
 # Siết quyền: một lỗ RCE trong app không kéo theo quyền trên cả máy.
 NoNewPrivileges=true

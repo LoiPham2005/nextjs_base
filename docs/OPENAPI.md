@@ -9,16 +9,17 @@ Tài liệu này hướng dẫn cách truy cập, xem tài liệu trực quan tr
 Khi ứng dụng đang chạy (`pnpm dev` hoặc `make dev`):
 
 - **Trang giao diện trực quan (Dành cho Người xem & Test API trực tiếp):**  
-  👉 `http://localhost:3000/docs` *(Giao diện Scalar UI hiện đại, mượt mà, hỗ trợ Dark/Light Mode)*
+  👉 `http://localhost:3000/docs` _(Giao diện Scalar UI hiện đại, mượt mà, hỗ trợ Dark/Light Mode)_
 - **OpenAPI JSON Spec (Dành cho Postman / Tool Code Gen):**  
   👉 `http://localhost:3000/api/v1/openapi.json`
-- **File sinh đặc tả từ Backend:** `src/lib/openapi/registry.ts` *(Tự động đồng bộ 100% với Zod Schema trong `src/schemas/*.ts`)*
+- **File sinh đặc tả từ Backend:** `src/lib/openapi/registry.ts` _(Tự động đồng bộ 100% với Zod Schema trong `src/schemas/*.ts`)_
 
 ---
 
 ## 2. Cách xem và kiểm thử nhanh (Test API)
 
 ### Cách 1: Xem và gọi thử trực tiếp trên Web (`/docs`)
+
 1. Mở trình duyệt vào `http://localhost:3000/docs`.
 2. Chọn bất kỳ API nào (ví dụ: `POST /api/v1/auth/login`).
 3. Bấm **"Test Request"** / **"Send"** để gửi request trực tiếp trên trình duyệt.
@@ -26,6 +27,7 @@ Khi ứng dụng đang chạy (`pnpm dev` hoặc `make dev`):
 ---
 
 ### Cách 2: Import vào Postman / Insomnia (1 Click)
+
 1. Mở **Postman** hoặc **Insomnia**.
 2. Chọn nút **Import** ở góc trên bên trái.
 3. Chọn tab **Link / URL** và dán:
@@ -45,12 +47,15 @@ Khi ứng dụng đang chạy (`pnpm dev` hoặc `make dev`):
 Bạn không cần phải viết tay các file Model (`User`, `LoginResponse`...) hay API Services trong Flutter. Hãy để công cụ tự động sinh từ file `openapi.json`.
 
 ### Bước 1: Mở Terminal tại thư mục dự án Flutter của bạn
+
 Đảm bảo bạn đang đứng ở thư mục gốc của dự án Flutter (nơi có file `pubspec.yaml`).
 
 ### Bước 2: Chạy lệnh sinh Code (Dùng `openapi-generator-cli`)
+
 Chạy một trong các lệnh sau tùy theo HTTP Client mà bạn sử dụng:
 
 #### ⚡ Cách 1: Dùng `Dio` (Khuyên dùng cho Flutter)
+
 ```bash
 npx @openapitools/openapi-generator-cli generate \
   -i http://localhost:3000/api/v1/openapi.json \
@@ -60,6 +65,7 @@ npx @openapitools/openapi-generator-cli generate \
 ```
 
 #### ⚡ Cách 2: Dùng `http` chuẩn của Dart
+
 ```bash
 npx @openapitools/openapi-generator-cli generate \
   -i http://localhost:3000/api/v1/openapi.json \
@@ -70,7 +76,9 @@ npx @openapitools/openapi-generator-cli generate \
 ---
 
 ### Bước 3: Cài đặt Dependencies trong `pubspec.yaml` (nếu cần)
+
 Nếu dùng `dart-dio`, thêm các package sau vào `pubspec.yaml` của Flutter:
+
 ```yaml
 dependencies:
   dio: ^5.7.0
@@ -81,7 +89,9 @@ dev_dependencies:
   build_runner: ^2.4.13
   built_value_generator: ^8.9.2
 ```
+
 Sau đó chạy:
+
 ```bash
 flutter pub get
 dart run build_runner build --delete-conflicting-outputs
@@ -90,6 +100,7 @@ dart run build_runner build --delete-conflicting-outputs
 ---
 
 ### Bước 4: Sử dụng trong Code Flutter
+
 Sau khi sinh code, bạn có thể gọi API dễ dàng và có Type Safety 100%:
 
 ```dart
@@ -124,6 +135,7 @@ void main() async {
 ---
 
 ## 4. Tự động sinh TypeScript Types (Dành cho Web Client / React / Vue)
+
 Nếu bạn có một dự án Web Frontend khác muốn dùng chung API này:
 
 ```bash
@@ -134,20 +146,20 @@ npx openapi-typescript http://localhost:3000/api/v1/openapi.json -o ./src/types/
 
 ## 5. Bảng tổng hợp các Endpoint REST API (`/api/v1/**`)
 
-| Nhóm API | Endpoint | Quyền hạn | Mô tả |
-| :--- | :--- | :---: | :--- |
-| **Auth** | `POST /api/v1/auth/register` | Public | Đăng ký tài khoản mới |
-| | `POST /api/v1/auth/login` | Public | Đăng nhập lấy access & refresh token |
-| | `POST /api/v1/auth/refresh` | Public | Cấp lại access token từ refresh token |
-| | `GET /api/v1/auth/me` | Bearer Token | Lấy thông tin user hiện tại |
-| | `POST /api/v1/auth/change-password` | Bearer Token | Đổi mật khẩu |
-| | `POST /api/v1/auth/forgot-password` | Public | Yêu cầu gửi link đặt lại mật khẩu |
-| | `POST /api/v1/auth/reset-password` | Public | Đặt lại mật khẩu với token |
-| | `POST /api/v1/auth/logout` | Bearer Token | Đăng xuất và thu hồi token |
-| **Users** | `GET /api/v1/users` | `user:read` | Lấy danh sách người dùng (hỗ trợ phân trang cursor) |
-| | `POST /api/v1/users` | `user:create` | Tạo người dùng mới |
-| | `GET /api/v1/users/[id]` | `user:read` | Xem chi tiết người dùng |
-| | `DELETE /api/v1/users/[id]` | `user:delete` | Xóa mềm người dùng |
-| | `PATCH /api/v1/users/[id]/status` | `user:update` | Khóa/Mở khóa tài khoản |
-| | `POST /api/v1/users/[id]/unlock` | `user:update` | Mở khóa sớm tài khoản bị khóa tạm |
-| **Hệ thống** | `GET /api/health` | Public | Kiểm tra sức khỏe hệ thống (Health check) |
+| Nhóm API     | Endpoint                            |   Quyền hạn   | Mô tả                                               |
+| :----------- | :---------------------------------- | :-----------: | :-------------------------------------------------- |
+| **Auth**     | `POST /api/v1/auth/register`        |    Public     | Đăng ký tài khoản mới                               |
+|              | `POST /api/v1/auth/login`           |    Public     | Đăng nhập lấy access & refresh token                |
+|              | `POST /api/v1/auth/refresh`         |    Public     | Cấp lại access token từ refresh token               |
+|              | `GET /api/v1/auth/me`               | Bearer Token  | Lấy thông tin user hiện tại                         |
+|              | `POST /api/v1/auth/change-password` | Bearer Token  | Đổi mật khẩu                                        |
+|              | `POST /api/v1/auth/forgot-password` |    Public     | Yêu cầu gửi link đặt lại mật khẩu                   |
+|              | `POST /api/v1/auth/reset-password`  |    Public     | Đặt lại mật khẩu với token                          |
+|              | `POST /api/v1/auth/logout`          | Bearer Token  | Đăng xuất và thu hồi token                          |
+| **Users**    | `GET /api/v1/users`                 |  `user:read`  | Lấy danh sách người dùng (hỗ trợ phân trang cursor) |
+|              | `POST /api/v1/users`                | `user:create` | Tạo người dùng mới                                  |
+|              | `GET /api/v1/users/[id]`            |  `user:read`  | Xem chi tiết người dùng                             |
+|              | `DELETE /api/v1/users/[id]`         | `user:delete` | Xóa mềm người dùng                                  |
+|              | `PATCH /api/v1/users/[id]/status`   | `user:update` | Khóa/Mở khóa tài khoản                              |
+|              | `POST /api/v1/users/[id]/unlock`    | `user:update` | Mở khóa sớm tài khoản bị khóa tạm                   |
+| **Hệ thống** | `GET /api/health`                   |    Public     | Kiểm tra sức khỏe hệ thống (Health check)           |

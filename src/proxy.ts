@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME, verifySession } from "@/lib/session";
+import { getRequestId, REQUEST_ID_HEADER } from "@/lib/request-id";
 
 /**
  * Proxy — tên mới của Middleware kể từ Next.js 16.
@@ -13,7 +14,7 @@ import { SESSION_COOKIE_NAME, verifySession } from "@/lib/session";
  */
 
 /** Prefix yêu cầu đã đăng nhập. */
-const PROTECTED_PREFIXES = ["/users"];
+const PROTECTED_PREFIXES = ["/users", "/roles"];
 
 /** Trang chỉ dành cho khách; đã đăng nhập rồi thì không cần vào nữa. */
 const GUEST_ONLY_PATHS = ["/login", "/register"];
@@ -71,8 +72,18 @@ export async function proxy(request: NextRequest) {
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
 
+  // Mã định danh request: tôn trọng giá trị reverse proxy đã gắn, chỉ sinh mới
+  // khi chưa có. Nhờ vậy log của ứng dụng nối được với log của Caddy/nginx
+  // thay vì mỗi tầng mang một mã riêng.
+  //
+  // Chỉ áp cho luồng TRANG — proxy cố tình không chạy trên /api, nên phía API
+  // việc này do `handleApiError` lo (xem src/lib/request-id.ts).
+  const requestId = getRequestId(request);
+  requestHeaders.set(REQUEST_ID_HEADER, requestId);
+
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("Content-Security-Policy", csp);
+  response.headers.set(REQUEST_ID_HEADER, requestId);
   return response;
 }
 

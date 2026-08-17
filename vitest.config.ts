@@ -55,6 +55,23 @@ export default defineConfig({
         "src/app/**/loading.tsx",
         "src/**/*.d.ts",
       ],
+
+      /*
+       * Ngưỡng đặt theo TỪNG VÙNG, không đặt một con số cho cả dự án.
+       *
+       * Một ngưỡng tổng phải hạ xuống thấp cho vừa các trang giao diện (vốn
+       * được E2E lo, không phải unit test lo), và khi đã hạ xuống thấp thì nó
+       * không còn chặn được gì ở tầng nghiệp vụ — đúng nơi cần chặn nhất.
+       *
+       * Các con số dưới đây được đặt ngay dưới mức thực tế hiện tại. Ý nghĩa
+       * của chúng là "không được tụt", không phải "phải đạt": tăng dần khi
+       * viết thêm test, và ĐỪNG hạ xuống để CI xanh — hạ ngưỡng là bỏ đúng
+       * cái phanh vừa lắp.
+       */
+      thresholds: {
+        "src/services/**": { statements: 70, branches: 62, functions: 70, lines: 70 },
+        "src/lib/api/**": { statements: 80, branches: 85, functions: 80, lines: 80 },
+      },
     },
   },
 });

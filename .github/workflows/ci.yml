@@ -84,6 +84,73 @@ jobs:
       - name: Build
         run: pnpm build
 
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Job riêng chứ không gộp vào `validate`: E2E cần build production + tải
+    # trình duyệt, nên nó chậm hơn hẳn phần còn lại. Gộp vào là mọi lần chạy
+    # CI đều phải chờ, kể cả khi chỉ sửa một dòng comment.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nextjs_prisma_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/nextjs_prisma_e2e?schema=public
+      SESSION_SECRET: ci-session-secret-must-be-at-least-32-characters-long
+      # Bộ test đăng ký tài khoản mới, mà đăng ký lại gửi email xác thực —
+      # thiếu biến này thì `emails.ts` ném lỗi thay vì dựng được link.
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3100
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Chỉ tải Chromium: bộ test chỉ khai báo một project, tải cả ba trình
+      # duyệt là mất thêm vài phút mỗi lần chạy mà không dùng tới.
+      - name: Cài trình duyệt Playwright
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Prisma generate
+        run: pnpm db:generate
+
+      - name: Apply migrations
+        run: pnpm db:deploy
+
+      # E2E đăng nhập bằng tài khoản mẫu, nên database phải có sẵn chúng.
+      - name: Seed dữ liệu mẫu
+        run: pnpm db:seed:dev
+
+      - name: Chạy E2E
+        run: pnpm test:e2e
+
+      # Chỉ tải lên khi hỏng: report của lần chạy xanh không ai mở.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest

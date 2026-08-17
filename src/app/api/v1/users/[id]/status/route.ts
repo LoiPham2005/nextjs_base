@@ -18,6 +18,6 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
     return apiOk({ user });
   } catch (error) {
-    return handleApiError(error, { route: "PATCH /api/v1/users/[id]/status" });
+    return handleApiError(error, { route: "PATCH /api/v1/users/[id]/status", request });
   }
 }

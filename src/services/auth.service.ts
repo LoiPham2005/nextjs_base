@@ -207,10 +207,17 @@ export class AuthService {
    * được cấp link: đó chính là cách hợp lệ để họ đặt mật khẩu lần đầu.
    */
   async requestPasswordReset(email: string): Promise<void> {
-    const user = await prisma.user.findUnique({
-      where: { email },
-      select: { id: true, email: true },
-    });
+    // Đi qua `userService.findByEmail` thay vì tự viết truy vấn, vì nó giữ hai
+    // luật mà chỗ này từng bỏ sót — và cả hai đều hỏng trong im lặng:
+    //
+    //   1. Chuẩn hoá email. Email lưu ở dạng chữ thường, nên tra bằng chuỗi
+    //      thô làm `Loi@X.com` không khớp dòng nào. Endpoint luôn trả 200 theo
+    //      thiết kế, nên người dùng chỉ thấy "đã gửi" rồi đợi mãi một lá thư
+    //      không tồn tại.
+    //   2. Bỏ qua tài khoản đã xoá mềm. Không lọc `deletedAt` thì tài khoản đã
+    //      xoá vẫn nhận được link đặt lại mật khẩu — một đường quay lại cho
+    //      thứ lẽ ra đã bị đóng.
+    const user = await userService.findByEmail(email);
 
     if (!user) return;
 

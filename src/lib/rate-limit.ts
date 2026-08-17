@@ -1,11 +1,43 @@
+import type { createClient } from "redis";
+import { env } from "./env";
+import { logger } from "./logger";
+
 /**
- * Rate limiter cửa sổ cố định, lưu trong bộ nhớ tiến trình.
+ * Chỉ import KIỂU của client Redis, không import giá trị.
  *
- * GIỚI HẠN CẦN BIẾT: state nằm trong RAM của một instance. Khi chạy nhiều
- * replica (hoặc serverless), mỗi instance đếm riêng nên giới hạn thực tế bị
- * nhân lên theo số instance. Đủ tốt để chặn brute-force đăng nhập ở quy mô 1
- * container; khi scale ngang thì thay `hit()` bằng Redis INCR + EXPIRE mà
- * không phải đụng tới nơi gọi.
+ * `import type` bị xoá sạch khi biên dịch, nên thư viện `redis` vẫn chỉ được
+ * nạp lúc chạy qua `await import()` bên dưới — máy không cấu hình Redis thì nó
+ * không bao giờ vào bộ nhớ.
+ */
+type RedisClient = ReturnType<typeof createClient>;
+
+/**
+ * Rate limiter cửa sổ cố định, có store cắm được.
+ *
+ * ---
+ * VÌ SAO CẦN REDIS
+ *
+ * Bản trước đếm trong RAM của tiến trình. Điều đó đủ cho đúng một container,
+ * nhưng hỏng theo hai cách khi lên thật:
+ *
+ *   - Chạy 2 replica → mỗi replica đếm riêng → ngưỡng thực tế nhân đôi. Kẻ dò
+ *     mật khẩu chỉ cần bắn qua load balancer là được gấp N lần số lần thử.
+ *   - Deploy hoặc restart → bộ đếm về 0. Đúng lúc bị dò, việc restart lại là
+ *     món quà cho phía tấn công.
+ *
+ * ---
+ * VÌ SAO VẪN GIỮ BẢN RAM
+ *
+ * Không phải dự án nào cũng có Redis, và bắt buộc phải có Redis mới chạy được
+ * `pnpm dev` là một rào cản vô nghĩa. Nên: có `REDIS_URL` thì dùng Redis, không
+ * có thì dùng RAM và ghi log cảnh báo một lần.
+ *
+ * ---
+ * VÌ SAO HÀM TRỞ THÀNH ASYNC
+ *
+ * Redis là I/O. Giữ chữ ký đồng bộ đồng nghĩa với việc không bao giờ cắm được
+ * Redis vào. Mọi nơi gọi đều đã nằm trong hàm async sẵn, nên cái giá chỉ là
+ * thêm một từ khoá `await`.
  */
 export type RateLimitOptions = { limit: number; windowSeconds: number };
 
@@ -41,18 +73,6 @@ export const RATE_LIMITS = {
   passwordChange: { limit: 10, windowSeconds: 900 },
 } as const satisfies Record<string, RateLimitOptions>;
 
-type Bucket = { count: number; resetAt: number };
-
-const buckets = new Map<string, Bucket>();
-
-/** Dọn bucket hết hạn để Map không phình vô hạn theo số IP đã từng gọi. */
-function evictExpired(now: number) {
-  if (buckets.size < 10_000) return;
-  for (const [key, bucket] of buckets) {
-    if (bucket.resetAt <= now) buckets.delete(key);
-  }
-}
-
 export type RateLimitResult = {
   success: boolean;
   remaining: number;
@@ -60,34 +80,213 @@ export type RateLimitResult = {
   retryAfterSeconds: number;
 };
 
-export function rateLimit(key: string, options: RateLimitOptions): RateLimitResult {
-  const now = Date.now();
-  const windowMs = options.windowSeconds * 1000;
+/**
+ * Hợp đồng của một store.
+ *
+ * `hit` trả về số lần đã dùng trong cửa sổ hiện tại và thời điểm cửa sổ reset.
+ * Phần quyết định cho qua hay chặn nằm ngoài store — nhờ vậy chính sách chỉ
+ * tồn tại ở một chỗ, dù đang chạy trên RAM hay trên Redis.
+ */
+type RateLimitStore = {
+  hit(key: string, windowSeconds: number): Promise<{ count: number; resetAt: number }>;
+  reset(key: string): Promise<void>;
+  clear(): Promise<void>;
+};
 
-  evictExpired(now);
+// ---------------------------------------------------------------------------
+// Store trong RAM — mặc định khi không có REDIS_URL
+// ---------------------------------------------------------------------------
 
-  const existing = buckets.get(key);
-  const bucket =
-    existing && existing.resetAt > now ? existing : { count: 0, resetAt: now + windowMs };
+type Bucket = { count: number; resetAt: number };
 
-  bucket.count += 1;
-  buckets.set(key, bucket);
+function createMemoryStore(): RateLimitStore {
+  const buckets = new Map<string, Bucket>();
 
-  const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+  /** Dọn bucket hết hạn để Map không phình vô hạn theo số IP đã từng gọi. */
+  function evictExpired(now: number) {
+    if (buckets.size < 10_000) return;
+    for (const [key, bucket] of buckets) {
+      if (bucket.resetAt <= now) buckets.delete(key);
+    }
+  }
 
   return {
-    success: bucket.count <= options.limit,
-    remaining: Math.max(0, options.limit - bucket.count),
+    hit(key, windowSeconds) {
+      const now = Date.now();
+      evictExpired(now);
+
+      const existing = buckets.get(key);
+      const bucket =
+        existing && existing.resetAt > now
+          ? existing
+          : { count: 0, resetAt: now + windowSeconds * 1000 };
+
+      bucket.count += 1;
+      buckets.set(key, bucket);
+
+      return Promise.resolve({ count: bucket.count, resetAt: bucket.resetAt });
+    },
+
+    reset(key) {
+      buckets.delete(key);
+      return Promise.resolve();
+    },
+
+    clear() {
+      buckets.clear();
+      return Promise.resolve();
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Store trên Redis — dùng khi có REDIS_URL
+// ---------------------------------------------------------------------------
+
+const REDIS_PREFIX = "rl:";
+
+function createRedisStore(url: string): RateLimitStore {
+  // Nạp `redis` bằng import động: máy không cấu hình Redis thì thư viện không
+  // bao giờ được kéo vào bộ nhớ, và bundle của Next cũng không phải mang nó.
+  let clientPromise: Promise<RedisClient> | null = null;
+
+  async function getClient() {
+    clientPromise ??= (async () => {
+      const { createClient } = await import("redis");
+      const client: RedisClient = createClient({ url });
+
+      // Không để lỗi kết nối thành unhandled error — node-redis phát 'error'
+      // trên mọi lần mất kết nối, và một sự kiện không ai nghe sẽ giết tiến trình.
+      client.on("error", (error: unknown) => {
+        logger.error("Rate limit: lỗi kết nối Redis", error);
+      });
+
+      await client.connect();
+      logger.info("Rate limit: dùng Redis", { url: redactUrl(url) });
+      return client;
+    })();
+
+    return clientPromise;
+  }
+
+  return {
+    async hit(key, windowSeconds) {
+      const client = await getClient();
+      const redisKey = `${REDIS_PREFIX}${key}`;
+
+      /*
+       * INCR rồi mới EXPIRE, và chỉ EXPIRE ở lần đầu tiên.
+       *
+       * Thứ tự này quan trọng: đặt lại TTL ở mỗi lần gọi sẽ biến cửa sổ cố
+       * định thành cửa sổ trượt vô hạn — kẻ tấn công gõ đều tay thì khoá không
+       * bao giờ hết hạn, kể cả sau khi họ đã dừng.
+       *
+       * Gộp vào một pipeline để chỉ đi một vòng mạng.
+       */
+      const replies: unknown[] = await client
+        .multi()
+        .incr(redisKey)
+        .expire(redisKey, windowSeconds, "NX")
+        .ttl(redisKey)
+        .exec();
+
+      const count = Number(replies[0]);
+      const ttl = Number(replies[2]);
+
+      // TTL âm nghĩa là khoá không có hạn (-1) hoặc vừa biến mất (-2). Cả hai
+      // đều bất thường; coi như cửa sổ vừa mở để không chặn oan người dùng.
+      const remainingSeconds = Number.isFinite(ttl) && ttl >= 0 ? ttl : windowSeconds;
+
+      return { count, resetAt: Date.now() + remainingSeconds * 1000 };
+    },
+
+    async reset(key) {
+      const client = await getClient();
+      await client.del(`${REDIS_PREFIX}${key}`);
+    },
+
+    async clear() {
+      const client = await getClient();
+      // Chỉ xoá khoá của rate limit, không đụng tới phần còn lại của Redis —
+      // instance này có thể đang được dùng chung với adapter của realtime.
+      const keys = await client.keys(`${REDIS_PREFIX}*`);
+      if (keys.length > 0) await client.del(keys);
+    },
+  };
+}
+
+/** Bỏ mật khẩu khỏi connection string trước khi đưa vào log. */
+function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) parsed.password = "***";
+    return parsed.toString();
+  } catch {
+    return "(không đọc được)";
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+let store: RateLimitStore | null = null;
+
+function getStore(): RateLimitStore {
+  if (store) return store;
+
+  if (env.REDIS_URL) {
+    store = createRedisStore(env.REDIS_URL);
+  } else {
+    store = createMemoryStore();
+    logger.warn(
+      "Rate limit chạy trong RAM (chưa set REDIS_URL). " +
+        "Đủ cho một instance; từ instance thứ hai trở đi mỗi bản đếm riêng nên " +
+        "ngưỡng thực tế bị nhân lên theo số instance.",
+    );
+  }
+
+  return store;
+}
+
+export async function rateLimit(key: string, options: RateLimitOptions): Promise<RateLimitResult> {
+  let hit: { count: number; resetAt: number };
+
+  try {
+    hit = await getStore().hit(key, options.windowSeconds);
+  } catch (error) {
+    /*
+     * FAIL-OPEN, có chủ đích.
+     *
+     * Redis chết mà ta chặn hết mọi request thì một sự cố hạ tầng biến thành
+     * sập dịch vụ toàn phần — đăng nhập, đăng ký, quên mật khẩu, tất cả đứng
+     * im. Đổi lại là một cửa sổ không có rate limit, đúng bằng thời gian Redis
+     * chết. Đánh đổi này CÓ THẬT: nếu hệ thống của bạn coi brute-force nguy
+     * hiểm hơn downtime, hãy đổi chỗ này thành chặn.
+     */
+    logger.error("Rate limit: store lỗi, tạm cho qua", error, { key });
+    return { success: true, remaining: options.limit, retryAfterSeconds: 0 };
+  }
+
+  const retryAfterSeconds = Math.max(1, Math.ceil((hit.resetAt - Date.now()) / 1000));
+
+  return {
+    success: hit.count <= options.limit,
+    remaining: Math.max(0, options.limit - hit.count),
     retryAfterSeconds,
   };
 }
 
 /** Xoá giới hạn của một key — gọi sau khi đăng nhập thành công. */
-export function resetRateLimit(key: string) {
-  buckets.delete(key);
+export async function resetRateLimit(key: string): Promise<void> {
+  try {
+    await getStore().reset(key);
+  } catch (error) {
+    // Không ném lên: người dùng vừa đăng nhập THÀNH CÔNG. Chặn họ chỉ vì dọn
+    // bộ đếm thất bại là biến một thao tác nền thành lỗi nhìn thấy được.
+    logger.error("Rate limit: không xoá được bộ đếm", error, { key });
+  }
 }
 
 /** Chỉ dùng trong test. */
-export function __clearRateLimits() {
-  buckets.clear();
+export async function __clearRateLimits(): Promise<void> {
+  await getStore().clear();
 }

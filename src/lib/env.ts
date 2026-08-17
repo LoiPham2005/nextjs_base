@@ -83,6 +83,18 @@ const envSchema = z.object({
   NEXT_PUBLIC_APP_URL: emptyAsUndefined(z.url().optional()),
 
   /**
+   * Redis dùng cho rate limit dùng chung giữa các instance.
+   *
+   * Bỏ trống = đếm trong RAM của từng tiến trình. Đủ cho một container, nhưng
+   * từ instance thứ hai trở đi mỗi bản đếm riêng, nên ngưỡng thực tế bị nhân
+   * lên theo số instance — và mỗi lần deploy là bộ đếm về 0.
+   *
+   * Cùng một Redis với tiến trình realtime cũng được: khoá của rate limit
+   * mang tiền tố riêng nên hai bên không giẫm lên nhau.
+   */
+  REDIS_URL: emptyAsUndefined(z.string().min(1).optional()),
+
+  /**
    * Chống brute-force theo TÀI KHOẢN, bổ sung cho rate-limit theo IP
    * (`src/lib/rate-limit.ts`). Rate-limit theo IP chặn một IP dò nhiều tài
    * khoản; cặp giá trị này chặn nhiều IP cùng dò một tài khoản.

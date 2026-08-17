@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   try {
     const session = await requireApiUser(request);
 
-    enforceRateLimit(request, "api:change-password", RATE_LIMITS.passwordChange);
+    await enforceRateLimit(request, "api:change-password", RATE_LIMITS.passwordChange);
 
     const body = await parseJsonBody(request, changePasswordSchema);
     await authService.changePassword(session.sub, body.currentPassword, body.newPassword);
@@ -30,6 +30,6 @@ export async function POST(request: Request) {
 
     return apiOk({ message: "Đổi mật khẩu thành công. Vui lòng đăng nhập lại." });
   } catch (error) {
-    return handleApiError(error, { route: "POST /api/v1/auth/change-password" });
+    return handleApiError(error, { route: "POST /api/v1/auth/change-password", request });
   }
 }

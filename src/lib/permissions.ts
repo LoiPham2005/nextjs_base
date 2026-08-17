@@ -41,6 +41,19 @@ export const PERMISSIONS = [
   "user:delete",
   "profile:read:own",
   "profile:update:own",
+
+  /*
+   * Quản trị vai trò và phân quyền.
+   *
+   * Tách `role:read` khỏi `role:update` vì hai việc rất khác nhau về mức nguy
+   * hiểm: xem ai đang có quyền gì là thao tác thường ngày, còn sửa bảng phân
+   * quyền là thao tác tự nâng quyền được — ai sửa được `role_permissions` thì
+   * tự cấp cho mình mọi quyền còn lại chỉ bằng vài cú tick.
+   */
+  "role:read",
+  "role:create",
+  "role:update",
+  "role:delete",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -85,7 +98,7 @@ export const DEFAULT_ROLE_PERMISSIONS: readonly RoleSeed[] = [
   {
     key: SYSTEM_ROLES.ADMIN,
     name: "Quản trị viên",
-    description: "Toàn quyền quản lý người dùng",
+    description: "Toàn quyền quản lý người dùng và phân quyền",
     permissions: [
       "user:read",
       "user:create",
@@ -93,6 +106,10 @@ export const DEFAULT_ROLE_PERMISSIONS: readonly RoleSeed[] = [
       "user:delete",
       "profile:read:own",
       "profile:update:own",
+      "role:read",
+      "role:create",
+      "role:update",
+      "role:delete",
     ],
   },
 ];
@@ -105,6 +122,10 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   "user:delete": "Xoá người dùng",
   "profile:read:own": "Xem hồ sơ của chính mình",
   "profile:update:own": "Sửa hồ sơ của chính mình",
+  "role:read": "Xem danh sách vai trò và bảng phân quyền",
+  "role:create": "Tạo vai trò mới",
+  "role:update": "Đổi tên vai trò và gán/gỡ quyền",
+  "role:delete": "Xoá vai trò",
 };
 
 const PERMISSION_SET: ReadonlySet<string> = new Set(PERMISSIONS);

@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: Request) {
   try {
-    enforceRateLimit(request, "api:reset-password", RATE_LIMITS.passwordChange);
+    await enforceRateLimit(request, "api:reset-password", RATE_LIMITS.passwordChange);
 
     const body = await parseJsonBody(request, resetPasswordSchema);
     await authService.resetPassword(body.token, body.password);
@@ -27,6 +27,6 @@ export async function POST(request: Request) {
       message: "Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại.",
     });
   } catch (error) {
-    return handleApiError(error, { route: "POST /api/v1/auth/reset-password" });
+    return handleApiError(error, { route: "POST /api/v1/auth/reset-password", request });
   }
 }

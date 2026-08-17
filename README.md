@@ -45,13 +45,15 @@ nextjs_base/
 ├── src/
 │   ├── proxy.ts               # CSP + chặn route chưa đăng nhập (Next 16 gọi là Proxy)
 │   ├── app/
-│   │   ├── (auth)/            # Trang login/register + Server Action xác thực + nút OAuth
+│   │   ├── (auth)/            # login/register/forgot-password/reset-password/verify-email
 │   │   ├── (admin)/users/     # CRUD người dùng (chỉ ADMIN) — route group khu quản trị
+│   │   ├── (admin)/roles/     # Vai trò & bảng tick phân quyền (quyền role:*)
 │   │   ├── api/
 │   │   │   ├── health/        # Health check — KHÔNG versioned, đọc bởi Docker/deploy script
 │   │   │   └── v1/            # REST API cho mobile, có version — xem mục riêng bên dưới
 │   │   │       ├── auth/      # register, login, refresh, logout, me, oauth/*
 │   │   │       ├── users/     # CRUD qua JSON, kể cả status/unlock
+│   │   │       ├── roles/     # Quản trị vai trò và bảng phân quyền
 │   │   │       └── openapi.json/  # Đặc tả OpenAPI sinh từ Zod schema
 │   │   ├── error.tsx          # Error boundary
 │   │   ├── global-error.tsx   # Bắt lỗi xảy ra ngay trong root layout
@@ -72,8 +74,11 @@ nextjs_base/
 │   ├── schemas/               # Zod schema (nguồn sự thật cho validation)
 │   └── services/              # Tầng nghiệp vụ — nơi duy nhất gọi Prisma
 ├── realtime/                  # Máy chủ WebSocket — TIẾN TRÌNH RIÊNG, ngoài Next
+├── e2e/                       # Playwright — luồng đăng nhập/phân quyền trên trình duyệt thật
+├── scripts/                   # Deploy + tác vụ vận hành (purge-expired.ts)
+├── deploy/                    # systemd unit, timer dọn token, Caddyfile
 ├── Dockerfile                 # 4 stage: deps / builder / migrator / runner
-└── docker-compose.yml         # postgres + migrate (chạy 1 lần) + web
+└── docker-compose.yml         # postgres + migrate (chạy 1 lần) + web + redis
 ```
 
 ---
@@ -114,8 +119,13 @@ khoá bằng test trong `src/app/(admin)/users/actions.test.ts`.
 - **CSP có nonce sinh theo từng request**, dựng trong `src/proxy.ts`.
 - **Biến môi trường validate lúc khởi động** — sai thì app không lên, thay vì
   chết ở request đầu tiên chạm tới nó.
-- **Rate limit đăng nhập**: 5 lần / 5 phút mỗi IP. State nằm trong RAM một
-  tiến trình — khi chạy nhiều replica thì thay bằng Redis, chỗ gọi giữ nguyên.
+- **Rate limit đăng nhập**: 5 lần / 5 phút mỗi IP. Store **cắm được**: có
+  `REDIS_URL` thì đếm trên Redis (dùng chung giữa các instance, sống qua
+  deploy), không có thì đếm trong RAM tiến trình kèm cảnh báo trong log. Bản
+  RAM đủ cho một container, nhưng từ instance thứ hai trở đi mỗi bản đếm riêng
+  nên ngưỡng thực tế bị nhân lên theo số instance.
+  ⚠️ Redis chết thì rate limit **fail-open** (tạm cho qua) chứ không chặn hết —
+  đánh đổi có chủ đích, xem ghi chú trong `src/lib/rate-limit.ts`.
 
 ---
 
@@ -169,7 +179,32 @@ await permissionService.canActOnResource(session.role, ownerId, session.sub, {
 `PERMISSION_DESCRIPTIONS`, gán mặc định trong `DEFAULT_ROLE_PERMISSIONS`, rồi
 `pnpm db:seed`. Không cần viết migration.
 
-**Thêm vai trò mới**: chèn thẳng vào bảng `roles` lúc chạy. Không cần deploy.
+**Thêm vai trò mới**: làm ngay trên giao diện `/roles`, hoặc qua
+`POST /api/v1/roles`. Không cần deploy, không cần gõ SQL.
+
+#### Màn hình quản trị `/roles`
+
+Đây là nơi lời hứa "sửa được lúc chạy" trở thành thao tác thật:
+
+- Tạo vai trò mới. Vai trò mới **bắt đầu với bộ quyền rỗng** — vừa tạo đã có
+  sẵn quyền là cách nhanh nhất để cấp nhầm.
+- Tick/bỏ tick quyền cho từng vai trò. Danh sách gửi lên mang ngữ nghĩa **thay
+  thế toàn bộ**, nên bỏ tick thực sự gỡ được quyền.
+- Xoá vai trò tự tạo.
+
+Ba luật an toàn nằm trong `roleService`, không nằm ở giao diện — nút bị gọi
+thẳng vẫn bị chặn:
+
+1. **`key` không đổi được sau khi tạo.** Nó nằm trong mọi JWT đang lưu hành;
+   đổi là vô hiệu hoá toàn bộ token còn hiệu lực, trong im lặng.
+2. **Vai trò `isSystem` không xoá được.** Xoá nhầm ADMIN là khoá cửa cả hệ
+   thống và không còn ai đủ quyền tạo lại.
+3. **Vai trò còn người dùng không xoá được.** Khoá ngoại cũng chặn, nhưng bằng
+   lỗi ràng buộc thô — chặn sớm để nói được câu người bấm nút hiểu được.
+
+Bốn quyền điều khiển màn hình này: `role:read`, `role:create`, `role:update`,
+`role:delete`. Tách `role:update` riêng vì nó **tự nâng quyền được** — ai sửa
+được bảng phân quyền thì tự cấp cho mình mọi quyền còn lại bằng vài cú tick.
 
 #### Cache — và hai giới hạn phải biết
 
@@ -182,7 +217,8 @@ năm.
    Cần đồng bộ tức thì thì chuyển cache sang Redis — chỗ gọi giữ nguyên.
 2. **Mọi thao tác ghi phân quyền BẮT BUỘC gọi `permissionService.invalidate()`.**
    Quên thì quản trị viên bỏ tick một quyền, thử lại ngay, thấy vẫn làm được,
-   và kết luận hệ thống hỏng.
+   và kết luận hệ thống hỏng. `roleService` đã gọi ở cả ba đường ghi
+   (create/update/delete); đường ghi mới nào cũng phải làm vậy.
 
 ⚠️ Quyền được tra theo `role` **lấy từ token**, không phải từ database. Người
 vừa bị đổi vai trò vẫn giữ vai trò cũ tới khi token hết hạn. Với thao tác nhạy
@@ -227,6 +263,39 @@ null` rồi kiểm tra số dòng. Đọc-trước-ghi-sau sẽ để hai reques
 kể cả khi gửi thư thất bại. Bất kỳ khác biệt nào — mã lỗi, thời gian phản hồi —
 đều biến nó thành công cụ dò danh sách người dùng. Lỗi thật vẫn vào log.
 
+#### Trang web cho các luồng này
+
+Link trong email trỏ tới đường dẫn của **web**, không phải REST API. Ba trang
+tương ứng nằm trong `src/app/(auth)/`:
+
+| Trang              | Vai trò                                                             |
+| ------------------ | ------------------------------------------------------------------- |
+| `/forgot-password` | Nhập email, luôn hiện cùng một thông điệp dù có tài khoản hay không |
+| `/reset-password`  | Đọc `?token=` từ link, đặt mật khẩu mới rồi xoá cookie phiên        |
+| `/verify-email`    | Đọc `?token=` từ link, xác thực khi người dùng BẤM NÚT              |
+
+⚠️ `/verify-email` **không tự xác thực lúc mở trang**, và đó là điều cố ý. Token
+chỉ dùng được một lần, mà bộ quét link của Gmail/Outlook tự mở mọi URL trong
+thư để kiểm tra an toàn — tiêu thụ token ngay lúc GET là để nó bị đốt trước khi
+người dùng kịp bấm, rồi họ nhận "liên kết đã hết hạn" cho một thư vừa gửi xong.
+
+#### Dọn token định kỳ
+
+`verification_tokens` và `refresh_tokens` là hai bảng **chỉ tăng**: mỗi lần
+đăng nhập trên điện thoại là một dòng, mỗi lần bấm "quên mật khẩu" là một dòng —
+kể cả khi người dùng không bao giờ mở email.
+
+```bash
+pnpm db:purge     # chạy tay
+```
+
+Trên máy chủ, cài systemd timer đi kèm (`make vps-files` in ra lệnh cụ thể):
+
+```bash
+sudo cp deploy/nextjs-base-purge.service deploy/nextjs-base-purge.timer /etc/systemd/system/
+sudo systemctl enable --now nextjs-base-purge.timer
+```
+
 ### Gửi email
 
 `src/lib/mailer.ts` chỉ định nghĩa interface. Bộ khung **cố tình không chọn nhà
@@ -265,6 +334,7 @@ pnpm typecheck
 pnpm lint             # thêm :fix để tự sửa
 pnpm format           # thêm :check để chỉ kiểm tra
 pnpm test             # thêm :watch hoặc :coverage
+pnpm test:e2e         # Playwright — tự build production rồi chạy trên trình duyệt thật
 pnpm check
 
 # Database
@@ -275,7 +345,11 @@ pnpm db:studio
 pnpm db:seed:dev      # dữ liệu mẫu
 pnpm db:seed:prod     # chỉ tài khoản admin nền
 pnpm db:reset         # XOÁ SẠCH rồi tạo lại
+pnpm db:purge         # dọn token đã hết hạn — gắn vào cron trên máy chủ
 ```
+
+⚠️ `pnpm test:e2e` cần database đã chạy `pnpm db:seed:dev`: bộ test đăng nhập
+bằng tài khoản mẫu của bộ seed đó.
 
 `make help` liệt kê các lệnh tương đương.
 
@@ -452,9 +526,15 @@ mọi handler phải gọi `requireApiUser()` hoặc `requireApiAdmin()`.
 | `GET` | `/api/v1/users` | ADMIN |
 | `POST` | `/api/v1/users` | ADMIN |
 | `GET` | `/api/v1/users/{id}` | ADMIN hoặc chính mình |
+| `PATCH` | `/api/v1/users/{id}` | ADMIN hoặc chính mình — ⚠️ `roleKey` LUÔN đòi `user:update` |
 | `DELETE` | `/api/v1/users/{id}` | ADMIN |
 | `PATCH` | `/api/v1/users/{id}/status` | ADMIN |
 | `POST` | `/api/v1/users/{id}/unlock` | ADMIN |
+| `GET` | `/api/v1/roles` | quyền `role:read` |
+| `POST` | `/api/v1/roles` | quyền `role:create` |
+| `GET` | `/api/v1/roles/{key}` | quyền `role:read` |
+| `PATCH` | `/api/v1/roles/{key}` | quyền `role:update` |
+| `DELETE` | `/api/v1/roles/{key}` | quyền `role:delete` |
 | `GET` | `/api/v1/openapi.json` | công khai |
 | `GET` | `/api/health` | công khai (unversioned)|
 
@@ -541,12 +621,9 @@ lạ thành 500 mà không để lộ nội dung ra ngoài.
 
 ## Việc còn để ngỏ
 
-- **Rate limit dùng Redis** khi chạy nhiều hơn một instance.
-- **Dọn refresh token hết hạn**: `tokenService.purgeExpired()` đã sẵn sàng,
-  chỉ cần gắn vào một cron. Bảng `refresh_tokens` chỉ tăng, mỗi lần đăng nhập
-  thêm một dòng.
 - **Error tracking** (Sentry/OpenTelemetry): điểm nối đã có sẵn trong
-  `src/app/error.tsx` và `src/lib/logger.ts`.
+  `src/app/error.tsx` và `src/lib/logger.ts`. Mã định danh request đã có
+  (`src/lib/request-id.ts`, header `X-Request-Id`) nên chỉ còn việc đẩy đi.
 - **Phân trang UI** cho `/users`: API đã có, trang web thì chưa dùng.
 - **Form chưa chạy khi tắt JavaScript.** Next 16 không nhúng `$ACTION_ID` cho
   form dùng `useActionState`, nên submit cần JS. Không ảnh hưởng người dùng

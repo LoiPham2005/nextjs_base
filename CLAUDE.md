@@ -20,6 +20,7 @@ pnpm typecheck                  # tsc --noEmit
 pnpm lint                       # eslint . (thêm :fix để tự sửa)
 pnpm format                     # prettier --write . (thêm :check để chỉ kiểm tra)
 pnpm test                       # toàn bộ test (thêm :watch hoặc :coverage)
+pnpm test:e2e                   # Playwright — tự build production rồi chạy trình duyệt thật
 pnpm check                      # cả 4 lệnh trên theo thứ tự — chạy trước khi coi là xong việc
 
 # 1 file test
@@ -31,7 +32,12 @@ pnpm db:generate                # sinh lại Prisma Client sau khi sửa schema.
 pnpm db:migrate                 # tạo + áp migration mới (dev)
 pnpm db:studio                  # GUI xem/sửa data — http://localhost:5555
 pnpm db:seed:dev                # dữ liệu mẫu (roles, user demo)
+pnpm db:purge                   # dọn token hết hạn (chạy qua tsconfig.scripts.json)
 ```
+
+⚠️ `pnpm test:e2e` cần database đã seed (`pnpm db:seed:dev`) — bộ test đăng nhập bằng tài
+khoản mẫu. Nó tự `pnpm build && pnpm start` trên cổng 3100, cố ý chạy bản production chứ không
+phải `next dev`: CSP và React Refresh khác nhau giữa hai môi trường, mà đó đúng là chỗ dễ hỏng.
 
 ⚠️ Sau khi sửa `prisma/schema.prisma`, **luôn chạy `pnpm db:generate` trước rồi tin
 `pnpm typecheck` qua terminal** — IDE hay báo lỗi type cũ (client thật nằm trong
@@ -71,11 +77,32 @@ nhật vào README**:
 - **Đăng nhập OAuth** (Google/Github/Facebook/Apple) — tự viết bằng `fetch`/`jose`
   (`src/lib/oauth/*`, `src/services/oauth.service.ts`), **không dùng thư viện `arctic`** (đã bị
   tác giả deprecate, xem GOTCHAS #5). Route: `/api/auth/oauth/[provider]/{start,callback}`.
-- **API mới**: `PATCH /api/users/[id]/status` (khoá/mở khoá), `POST /api/users/[id]/unlock` (mở
-  khoá sớm) — cả hai cần quyền `user:update`.
-- **Route group `(admin)`**: `/users` hiện nằm ở `src/app/(admin)/users/` (URL không đổi). Quy tắc
+- **API mới**: `PATCH /api/v1/users/[id]/status` (khoá/mở khoá), `POST /api/v1/users/[id]/unlock`
+  (mở khoá sớm) — cả hai cần quyền `user:update`. Thêm `PATCH /api/v1/users/[id]` (sửa hồ sơ):
+  chính mình cần `profile:update:own`, người khác cần `user:update`, **riêng `roleKey` luôn đòi
+  `user:update`** kể cả khi sửa chính mình — nếu không thì mọi user tự phong ADMIN được bằng một
+  field trong body.
+- **Quản trị vai trò** (`roleService`, `/roles`, `/api/v1/roles*`): ba bảng RBAC giờ có đường ghi
+  từ ứng dụng, trước đây chỉ sửa được bằng SQL tay. Bốn quyền mới: `role:read/create/update/delete`
+  — nhớ `pnpm db:seed` sau khi pull để đồng bộ danh mục quyền xuống database. Mọi đường ghi phân
+  quyền BẮT BUỘC gọi `permissionService.invalidate()`.
+- **Trang cho luồng email**: `/forgot-password`, `/reset-password`, `/verify-email` (trong
+  `(auth)/`). Link trong email trỏ tới đây; trước đó chỉ có REST API nên bấm link là 404.
+  `/verify-email` cố ý xác thực khi BẤM NÚT chứ không khi mở trang — bộ quét link của Gmail sẽ
+  đốt mất token dùng-một-lần trước khi người dùng kịp bấm.
+- **Rate limit có store cắm được** (`src/lib/rate-limit.ts`): `REDIS_URL` → Redis, không có →
+  RAM. Hàm đã thành **async**, nên `rateLimit()`/`resetRateLimit()`/`enforceRateLimit()` đều phải
+  `await`. Redis chết thì fail-open (tạm cho qua), có chủ đích.
+- **Route group `(admin)`**: `/users` và `/roles` nằm ở `src/app/(admin)/` (URL không đổi). Quy tắc
   đặt route group cho trang mới: chỉ tạo group khi có ranh giới quyền hạn thật + khả năng cần
   layout riêng — trang ai đăng nhập cũng xem được thì để thẳng ngoài `app/`, không group.
+- **E2E Playwright** (`e2e/`): lớp duy nhất bắt được loại lỗi "form gửi tên trường khác với
+  schema" — typecheck không thấy (`safeParse` nhận `unknown`), unit test không thấy (gọi thẳng
+  service). Giữ bộ này HẸP, chỉ những luồng mà hỏng là dịch vụ chết.
+- **Ngưỡng coverage theo vùng** (`vitest.config.ts`): `src/services/**` và `src/lib/api/**`. Ý
+  nghĩa là "không được tụt" — đừng hạ ngưỡng để CI xanh.
+- **`tsconfig.scripts.json`**: script Node ngoài Next (như `pnpm db:purge`) cần nó để stub
+  `server-only`. Đừng đưa alias đó vào `tsconfig.json` gốc — làm vậy là gỡ chốt chặn cho cả app.
 - **`src/components/`** đang được dựng theo hướng Shadcn-style (`ui/`, `layout/`, `common/`) — chỉ
   file nào **thực sự có nơi dùng** mới nên giữ, tránh tạo component rỗng "để sau".
 - **Chưa có backup database tự động** — self-host Postgres qua Docker Compose, VPS mất là mất data.

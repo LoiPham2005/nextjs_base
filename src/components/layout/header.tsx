@@ -24,6 +24,12 @@ export async function Header() {
             >
               Quản lý Users
             </Link>
+            <Link
+              href="/roles"
+              className="text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white transition-colors"
+            >
+              Vai trò
+            </Link>
           </nav>
         </div>
 

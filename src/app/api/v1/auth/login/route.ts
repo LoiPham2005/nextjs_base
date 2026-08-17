@@ -10,18 +10,18 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const rateLimitKey = enforceRateLimit(request, "api:login", RATE_LIMITS.login);
+    const rateLimitKey = await enforceRateLimit(request, "api:login", RATE_LIMITS.login);
 
     const body = await parseJsonBody(request, loginSchema);
     const user = await authService.validateCredentials(body);
 
-    resetRateLimit(rateLimitKey);
+    await resetRateLimit(rateLimitKey);
     logger.info("API login", { userId: user.id });
 
     const tokens = await issueTokenPair(user, request.headers.get("user-agent"));
 
     return apiOk({ user, ...tokens });
   } catch (error) {
-    return handleApiError(error, { route: "POST /api/v1/auth/login" });
+    return handleApiError(error, { route: "POST /api/v1/auth/login", request });
   }
 }

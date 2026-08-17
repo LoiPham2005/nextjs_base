@@ -24,6 +24,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
@@ -36,6 +38,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:prod": "SEED_TYPE=prod tsx prisma/seed.ts",
     "db:seed:dev": "SEED_TYPE=dev tsx prisma/seed.ts",
+    "db:purge": "tsx --tsconfig tsconfig.scripts.json scripts/purge-expired.ts",
     "postinstall": "prisma generate",
     "prepare": "husky || true"
   },
@@ -93,6 +96,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@next/eslint-plugin-next": "^16.3.1",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",

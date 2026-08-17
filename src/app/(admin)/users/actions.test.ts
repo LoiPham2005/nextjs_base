@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as UserServiceModule from "@/services/user.service";
-import { SelfDeletionError } from "@/services/user.service";
+import { SelfDeletionError, UsernameAlreadyExistsError } from "@/services/user.service";
 
 /**
  * Đây là bài test quan trọng nhất trong repo.
@@ -87,6 +87,59 @@ describe("createUserAction", () => {
 
     expect(result.fieldErrors?.email).toBeDefined();
     expect(userService.create).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Bài test này canh một lỗi đã xảy ra thật và KHÔNG lỗi nào bắt được nó:
+   * form gửi `name` trong khi schema đã đổi sang `fullName`. Zod strip im lặng
+   * khoá lạ nên parse vẫn thành công, typecheck vẫn xanh (`safeParse` nhận
+   * `unknown`), chỉ có dữ liệu người dùng vừa nhập là biến mất.
+   *
+   * Vì vậy phải khẳng định trên ĐỐI SỐ THẬT truyền xuống service, chứ không
+   * chỉ khẳng định action chạy xong không lỗi.
+   */
+  it("chuyển tiếp fullName và username xuống service", async () => {
+    vi.mocked(getSession).mockResolvedValue(adminSession);
+    vi.mocked(userService.create).mockResolvedValue({
+      id: "u-3",
+      email: "new@example.com",
+      username: "nguyenvana",
+      fullName: "Nguyễn Văn A",
+      roleName: "Người dùng",
+      emailVerifiedAt: null,
+      status: "ACTIVE",
+      lockedUntil: null,
+      role: "USER",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await createUserAction(
+      {},
+      form({
+        email: "new@example.com",
+        fullName: "Nguyễn Văn A",
+        username: "nguyenvana",
+      }),
+    );
+
+    expect(vi.mocked(userService.create).mock.calls[0]?.[0]).toMatchObject({
+      email: "new@example.com",
+      fullName: "Nguyễn Văn A",
+      username: "nguyenvana",
+    });
+  });
+
+  it("đưa lỗi trùng tên đăng nhập về đúng ô username", async () => {
+    vi.mocked(getSession).mockResolvedValue(adminSession);
+    vi.mocked(userService.create).mockRejectedValue(new UsernameAlreadyExistsError("trung"));
+
+    const result = await createUserAction(
+      {},
+      form({ email: "new@example.com", username: "trung" }),
+    );
+
+    expect(result.fieldErrors?.username?.[0]).toContain("trung");
   });
 });
 
