@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { apiPath } from "@/lib/api/version";
 import type { OAuthProviderId } from "./types";
 
 export type ProviderConfig = {
@@ -68,5 +69,5 @@ export function callbackUrl(provider: OAuthProviderId): string {
   if (!env.NEXT_PUBLIC_APP_URL) {
     throw new Error("NEXT_PUBLIC_APP_URL là bắt buộc để dùng đăng nhập OAuth");
   }
-  return `${env.NEXT_PUBLIC_APP_URL}/api/v1/auth/oauth/${provider}/callback`;
+  return `${env.NEXT_PUBLIC_APP_URL}${apiPath(`/auth/oauth/${provider}/callback`)}`;
 }

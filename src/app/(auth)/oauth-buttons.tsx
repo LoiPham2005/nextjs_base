@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { apiPath } from "@/lib/api/version";
 import { isProviderConfigured } from "@/lib/oauth/config";
 import { OAUTH_PROVIDERS, type OAuthProviderId } from "@/lib/oauth/types";
 
@@ -22,7 +23,7 @@ export function OAuthButtons({ next }: { next?: string }) {
       {configured.map((provider) => (
         <Link
           key={provider}
-          href={`/api/v1/auth/oauth/${provider}/start${next ? `?next=${encodeURIComponent(next)}` : ""}`}
+          href={`${apiPath(`/auth/oauth/${provider}/start`)}${next ? `?next=${encodeURIComponent(next)}` : ""}`}
           className="btn btn-secondary"
           style={{ width: "100%" }}
         >

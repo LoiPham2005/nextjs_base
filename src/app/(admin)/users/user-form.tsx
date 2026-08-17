@@ -58,7 +58,9 @@ export function UserForm() {
             </p>
           )}
         </div>
+      </div>
 
+      <div className="form-actions">
         <button type="submit" disabled={isPending} className="btn btn-primary">
           {isPending ? "Đang thêm..." : "+ Thêm người dùng"}
         </button>

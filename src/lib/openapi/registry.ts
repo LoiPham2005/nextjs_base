@@ -20,6 +20,7 @@ import {
   userSchema,
 } from "@/schemas/user.schema";
 import { createRoleSchema, updateRoleSchema } from "@/schemas/role.schema";
+import { API_PREFIX } from "@/lib/api/version";
 
 /**
  * Đăng ký OpenAPI cho toàn bộ REST API mobile (`/api/v1/**`).
@@ -411,6 +412,6 @@ export function getOpenApiDocument() {
         "REST API cho client mobile — dùng Bearer token, khác cookie session của web. " +
         "Tự sinh từ Zod schema thật trong src/schemas/*.ts, không phải viết tay riêng.",
     },
-    servers: [{ url: "/api/v1" }],
+    servers: [{ url: API_PREFIX }],
   });
 }

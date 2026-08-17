@@ -27,16 +27,14 @@ export function Logo({
     <Link href={href} className={cn("flex items-center gap-2.5 group select-none", className)}>
       <div
         className={cn(
-          "flex items-center justify-center bg-blue-600 text-white shadow-md shadow-blue-500/20 transition-transform group-hover:scale-105",
+          "flex items-center justify-center bg-brand text-white shadow-md shadow-brand/20 transition-transform group-hover:scale-105",
           sizes[size].box,
         )}
       >
         <Layers className={sizes[size].icon} />
       </div>
       {showText && (
-        <span className={cn("tracking-tight text-gray-900 dark:text-white", sizes[size].text)}>
-          {title}
-        </span>
+        <span className={cn("tracking-tight text-content", sizes[size].text)}>{title}</span>
       )}
     </Link>
   );

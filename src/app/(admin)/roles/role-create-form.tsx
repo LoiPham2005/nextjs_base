@@ -54,7 +54,9 @@ export function RoleCreateForm() {
         <div>
           <input name="description" placeholder="Mô tả (không bắt buộc)" className="input-field" />
         </div>
+      </div>
 
+      <div className="form-actions">
         <button type="submit" disabled={isPending} className="btn btn-primary">
           {isPending ? "Đang tạo…" : "+ Tạo vai trò"}
         </button>

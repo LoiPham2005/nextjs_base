@@ -32,7 +32,7 @@ export default async function UsersPage() {
           <Link href="/" style={{ fontSize: "0.9rem", color: "var(--text-muted)" }}>
             ← Quay lại trang chủ
           </Link>
-          <h1 style={{ fontSize: "2rem", fontWeight: 800, marginTop: 4 }}>Quản lý người dùng</h1>
+          <h1 className="page-title">Quản lý người dùng</h1>
         </div>
         <span className="badge badge-primary">Tổng: {total}</span>
       </div>

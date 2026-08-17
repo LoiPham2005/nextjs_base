@@ -40,10 +40,8 @@ export default async function RolesPage() {
         <Link href="/users" style={{ fontSize: "0.9rem", color: "var(--text-muted)" }}>
           ← Quản lý người dùng
         </Link>
-        <h1 style={{ fontSize: "2rem", fontWeight: 800, marginTop: 4 }}>
-          Vai trò &amp; phân quyền
-        </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginTop: 4 }}>
+        <h1 className="page-title">Vai trò &amp; phân quyền</h1>
+        <p className="page-subtitle">
           Thay đổi có hiệu lực ngay. Riêng người đang đăng nhập giữ vai trò cũ trong token cho tới
           khi phiên hết hạn.
         </p>
