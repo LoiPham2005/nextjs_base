@@ -40,6 +40,45 @@ realtime (WebSocket im lặng không hoạt động, **không có lỗi nào bá
 
 ⚠️ Nếu Coolify hỏi "Docker Compose Location", để nguyên `/docker-compose.yml`.
 
+### Không cần cài Caddy, cũng không cần cài Docker
+
+Coolify **tự cài Docker** khi bạn cài nó, và **tự chạy reverse proxy riêng**
+(Traefik, hoặc Caddy tuỳ phiên bản/cấu hình). Proxy đó lo luôn việc gắn domain
+và xin chứng chỉ Let's Encrypt.
+
+Vì vậy khi dùng Coolify:
+
+| Thứ                             | Có cần không                                             |
+| ------------------------------- | -------------------------------------------------------- |
+| Docker                          | ✅ Có dùng — nhưng Coolify tự cài, bạn không cài tay     |
+| `docker-compose.yml` trong repo | ✅ Chính là thứ Coolify deploy                           |
+| Cài Caddy tay                   | ❌ **Không.** Sẽ tranh cổng 80/443 với proxy của Coolify |
+| `deploy/Caddyfile`              | ❌ Không dùng tới — file đó chỉ cho hướng systemd/PM2    |
+| `deploy/*.service` (systemd)    | ❌ Không dùng tới                                        |
+
+Hệ quả quan trọng: mọi thứ mục 4.2 nói về định tuyến `/socket.io/*` phải làm
+**trong giao diện Coolify**, không phải sửa `Caddyfile` — file đó không được nạp.
+
+### Cổng: điểm khác biệt lớn nhất khi chạy nhiều dự án
+
+`docker-compose.yml` có công bố cổng ra máy chủ (`127.0.0.1:3000`,
+`127.0.0.1:5432`, `127.0.0.1:3002`). Chúng đã bind vào loopback nên **an toàn**,
+nhưng vẫn chiếm cổng trên máy chủ.
+
+Chạy dự án thứ hai trên cùng VPS mà không đổi gì thì Coolify sẽ báo
+`port is already allocated`. Cách xử lý: đặt cho mỗi dự án một bộ cổng riêng
+trong phần biến môi trường:
+
+| Biến            | Dự án 1 | Dự án 2 |
+| --------------- | ------- | ------- |
+| `APP_PORT`      | 3000    | 3010    |
+| `POSTGRES_PORT` | 5432    | 5433    |
+| `REALTIME_PORT` | 3002    | 3012    |
+
+Những cổng này chỉ dùng để bạn `curl` kiểm tra hoặc nối DBeaver qua SSH tunnel.
+Proxy của Coolify nói chuyện với container qua **network nội bộ của Docker**,
+không đi qua cổng công bố — nên đổi chúng không ảnh hưởng gì tới domain.
+
 ---
 
 ## 3. Biến môi trường
@@ -234,18 +273,20 @@ khôi phục ít nhất một lần**. Chi tiết: [disaster-recovery.md](disast
 
 ## 9. Sự cố thường gặp
 
-| Triệu chứng                                                     | Nguyên nhân                                                                                     |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Container chết ngay, log ghi "Cấu hình môi trường không hợp lệ" | Thiếu biến bắt buộc. Log có ghi rõ tên biến.                                                    |
-| `/api/health` trả 503                                           | `web` sống nhưng không nối được `postgres`. Kiểm tra `POSTGRES_PASSWORD` khớp giữa hai service. |
-| App chạy nhưng bảng chưa tồn tại                                | `migrate` không chạy — thường do chọn nhầm build pack Nixpacks/Dockerfile.                      |
-| WebSocket không kết nối, container `realtime` vẫn xanh          | Chưa định tuyến `/socket.io/*` (mục 4.2).                                                       |
-| WebSocket bị chặn bởi CORS                                      | `REALTIME_CORS_ORIGIN` chưa trỏ đúng domain thật.                                               |
-| Kết nối WebSocket bị từ chối `unauthorized`                     | `SESSION_SECRET` lệch giữa `web` và `realtime`.                                                 |
-| Tính năng phía client thiếu URL app                             | `NEXT_PUBLIC_APP_URL` chưa bật **Build Variable** (mục 4.1).                                    |
-| Gửi email ném lỗi                                               | Thiếu `NEXT_PUBLIC_APP_URL`, hoặc chưa gọi `setMailer()` với nhà cung cấp thật.                 |
-| OAuth trả `redirect_uri_mismatch`                               | Redirect URI phải là `<APP_URL>/api/v1/auth/oauth/<provider>/callback` — chú ý phần `/v1`.      |
-| Đăng nhập xong bị đá ra ngay                                    | `SESSION_SECRET` vừa đổi → mọi cookie cũ thành không hợp lệ.                                    |
+| Triệu chứng                                                     | Nguyên nhân                                                                                               |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Container chết ngay, log ghi "Cấu hình môi trường không hợp lệ" | Thiếu biến bắt buộc. Log có ghi rõ tên biến.                                                              |
+| `/api/health` trả 503                                           | `web` sống nhưng không nối được `postgres`. Kiểm tra `POSTGRES_PASSWORD` khớp giữa hai service.           |
+| App chạy nhưng bảng chưa tồn tại                                | `migrate` không chạy — thường do chọn nhầm build pack Nixpacks/Dockerfile.                                |
+| WebSocket không kết nối, container `realtime` vẫn xanh          | Chưa định tuyến `/socket.io/*` (mục 4.2).                                                                 |
+| WebSocket bị chặn bởi CORS                                      | `REALTIME_CORS_ORIGIN` chưa trỏ đúng domain thật.                                                         |
+| Kết nối WebSocket bị từ chối `unauthorized`                     | `SESSION_SECRET` lệch giữa `web` và `realtime`.                                                           |
+| Deploy dự án thứ 2 báo `port is already allocated`              | Hai dự án cùng dùng `APP_PORT`/`POSTGRES_PORT`/`REALTIME_PORT`. Đặt bộ cổng riêng cho từng dự án (mục 2). |
+| Cổng 80/443 bị chiếm, Coolify không cấp được SSL                | Có Caddy/nginx cài tay từ trước đang giữ cổng. Gỡ đi — Coolify có proxy riêng.                            |
+| Tính năng phía client thiếu URL app                             | `NEXT_PUBLIC_APP_URL` chưa bật **Build Variable** (mục 4.1).                                              |
+| Gửi email ném lỗi                                               | Thiếu `NEXT_PUBLIC_APP_URL`, hoặc chưa gọi `setMailer()` với nhà cung cấp thật.                           |
+| OAuth trả `redirect_uri_mismatch`                               | Redirect URI phải là `<APP_URL>/api/v1/auth/oauth/<provider>/callback` — chú ý phần `/v1`.                |
+| Đăng nhập xong bị đá ra ngay                                    | `SESSION_SECRET` vừa đổi → mọi cookie cũ thành không hợp lệ.                                              |
 
 Thêm các bẫy đã gặp thật: [GOTCHAS.md](GOTCHAS.md).
 

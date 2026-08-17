@@ -46,9 +46,27 @@ sudo ufw allow 80,443/tcp
 sudo ufw enable
 ```
 
-⚠️ **Không mở cổng 3000 và 3002 ra Internet.** Hai cổng đó chỉ nghe trên
-loopback; reverse proxy là cửa duy nhất đi vào. Mở ra là bỏ qua cả TLS lẫn
-rate limit của proxy.
+⚠️ **`ufw` KHÔNG chặn được cổng do Docker công bố.** Đây là cái bẫy khiến rất
+nhiều VPS bị lộ database mà chủ máy tin là đã đóng. Docker tự ghi luật vào
+chuỗi `DOCKER` của iptables, nằm TRƯỚC luật của ufw — chạy `ufw deny 5432`
+xong vẫn kết nối từ ngoài vào được như thường.
+
+Cách chặn duy nhất đáng tin: **bind cổng vào `127.0.0.1` ngay trong compose**.
+`docker-compose.yml` của dự án đã làm sẵn cho cả ba cổng:
+
+```yaml
+ports:
+  - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+```
+
+Kiểm tra lại trên VPS sau khi deploy — chạy TỪ MÁY BẠN, không phải từ VPS:
+
+```bash
+nc -zv <ip-server> 5432    # mong đợi: refused / timeout
+nc -zv <ip-server> 3000    # mong đợi: refused / timeout
+```
+
+Nếu hai lệnh trên kết nối được thì cổng đang mở ra Internet — sửa ngay.
 
 ---
 

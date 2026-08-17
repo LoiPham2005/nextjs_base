@@ -12,8 +12,18 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-nextjs_prisma_base}
+    # ⚠️ BẮT BUỘC gắn `127.0.0.1:` phía trước.
+    #
+    # Không có nó, Docker mở cổng ra 0.0.0.0 — tức là Postgres nghe trên IP
+    # công khai của VPS. Với mật khẩu mặc định `postgres` thì đó là database
+    # mở toang cho cả Internet.
+    #
+    # Và đây là phần nhiều người không biết: **ufw KHÔNG chặn được cổng do
+    # Docker công bố**. Docker tự ghi luật vào chuỗi DOCKER của iptables, nằm
+    # trước luật của ufw. Chạy `ufw deny 5432` xong vẫn kết nối vào được như
+    # thường — tưởng đã đóng mà thực ra vẫn mở.
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -104,8 +114,12 @@ services:
       # Rate limit dùng chung giữa các instance. Cùng một Redis với realtime —
       # khoá của rate limit mang tiền tố riêng nên hai bên không giẫm lên nhau.
       REDIS_URL: redis://redis:6379
+    # Chỉ nghe loopback: reverse proxy (Caddy/Traefik/Coolify) là cửa duy nhất
+    # đi vào. Mở ra 0.0.0.0 thì client gọi thẳng cổng 3000, bỏ qua TLS — và
+    # nguy hiểm hơn: bỏ qua luôn bước proxy GHI ĐÈ X-Forwarded-For, nên ai cũng
+    # tự khai IP giả được và né sạch rate limit đăng nhập.
     ports:
-      - "${APP_PORT:-3000}:3000"
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -159,8 +173,10 @@ services:
       REALTIME_CORS_ORIGIN: ${REALTIME_CORS_ORIGIN:-http://localhost:3000}
       # Phải TRÙNG KHỚP với app chính: token do web/mobile cấp được verify ở đây.
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET là bắt buộc}
+    # Cùng lý do với `web`: proxy định tuyến /socket.io/* vào đây, không ai
+    # được phép gọi thẳng cổng 3002 từ ngoài.
     ports:
-      - "${REALTIME_PORT:-3002}:3002"
+      - "127.0.0.1:${REALTIME_PORT:-3002}:3002"
     depends_on:
       redis:
         condition: service_healthy

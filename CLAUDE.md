@@ -123,7 +123,12 @@ nhật vào README**:
 
 ## Tài liệu khác trong `docs/`
 
-- [DEPLOY_COOLIFY.md](docs/DEPLOY_COOLIFY.md) — deploy bằng Coolify (self-hosted PaaS). Bắt buộc chọn build pack **Docker Compose**, vì dự án cần 5 service chạy cùng nhau.
+- [DEPLOY_COOLIFY.md](docs/DEPLOY_COOLIFY.md) — deploy bằng Coolify (self-hosted PaaS). Bắt buộc
+  chọn build pack **Docker Compose**, vì dự án cần 5 service chạy cùng nhau. Coolify tự cài
+  Docker và có proxy riêng — **đừng cài Caddy tay**, sẽ tranh cổng 80/443.
+- ⚠️ **Cổng trong `docker-compose.yml` phải bind `127.0.0.1:`.** `ufw` KHÔNG chặn được cổng do
+  Docker công bố (Docker ghi luật vào chuỗi DOCKER của iptables, đứng trước ufw), nên bỏ tiền
+  tố loopback là Postgres nghe thẳng trên IP công khai — và `ufw deny 5432` không cứu được.
 - [DEPLOY_VPS.md](docs/DEPLOY_VPS.md) — deploy lên VPS bằng Docker / systemd / PM2. Cả ba đường
   đều chạy **hai** tiến trình (web + realtime); thiếu cái thứ hai thì WebSocket im lặng không hoạt
   động. Caddyfile phải có khối `/socket.io/*` sang cổng 3002, nếu không realtime chạy mà không ai
