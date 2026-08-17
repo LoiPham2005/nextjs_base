@@ -15,6 +15,9 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/var/www/nextjs-base}"
 SERVICE="${SERVICE:-nextjs-base}"
+# Tiến trình WebSocket chạy riêng. Đặt REALTIME_SERVICE= (rỗng) nếu dự án của
+# bạn không dùng realtime.
+REALTIME_SERVICE="${REALTIME_SERVICE:-nextjs-base-realtime}"
 ENV_FILE="${ENV_FILE:-/etc/nextjs-base/env}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3000/api/health}"
 
@@ -54,8 +57,26 @@ pnpm db:deploy
 step "Build"
 pnpm build
 
+# Realtime được esbuild gói thành MỘT file `realtime/dist/server.cjs`. Bước này
+# từng bị bỏ sót hoàn toàn: script chỉ build web, nên máy chủ WebSocket trên VPS
+# mãi là bản cũ — hoặc chưa từng tồn tại.
+if [ -d "realtime" ]; then
+	step "Build realtime (WebSocket)"
+	pnpm realtime:build
+fi
+
 step "Khởi động lại service"
 sudo systemctl restart "$SERVICE"
+
+# Restart realtime SAU web, và chỉ khi unit đã được cài. Người cố ý không dùng
+# realtime thì bỏ qua, không làm deploy đỏ vì một service họ không cần.
+if [ -n "$REALTIME_SERVICE" ] && systemctl list-unit-files "$REALTIME_SERVICE.service" --no-legend 2>/dev/null | grep -q .; then
+	step "Khởi động lại realtime"
+	sudo systemctl restart "$REALTIME_SERVICE"
+elif [ -n "$REALTIME_SERVICE" ]; then
+	printf '  \033[1;33m⚠️  Chưa cài %s.service — WebSocket sẽ KHÔNG chạy.\033[0m\n' "$REALTIME_SERVICE"
+	printf '     Cài: sudo cp deploy/nextjs-base-realtime.service /etc/systemd/system/\n'
+fi
 
 step "Kiểm tra sức khoẻ"
 for attempt in $(seq 1 30); do

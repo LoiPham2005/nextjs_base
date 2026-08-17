@@ -64,9 +64,13 @@ hơn nếu repo private) → cho phép Coolify đọc repo.
 Chỉ cần lặp lại **New Resource** trỏ tới repo khác — Coolify tự cô lập network
 Docker giữa các app, không đụng nhau, tất cả quản lý chung 1 dashboard.
 
-## Ví dụ áp dụng: `nextjs_prisma_base`
+## Áp dụng cho chính dự án này
 
-Repo `d:\personal_project\nextjs_prisma_base` đã có sẵn `docker-compose.yml`
-(gồm `postgres`, `migrate`, `web`, `redis`, `realtime`) — chọn thẳng build pack
-**Docker Compose** khi tạo resource trong Coolify, không cần chỉnh sửa gì thêm
-trong repo.
+Repo đã có sẵn `docker-compose.yml` (gồm `postgres`, `migrate`, `web`, `redis`,
+`realtime`) — chọn thẳng build pack **Docker Compose**, không cần sửa gì trong
+repo.
+
+👉 **Hướng dẫn chi tiết: [DEPLOY_COOLIFY.md](DEPLOY_COOLIFY.md)** — biến môi
+trường nào bắt buộc, ba chỗ dễ sai (`NEXT_PUBLIC_APP_URL` phải là build
+variable, định tuyến `/socket.io/*` sang cổng 3002, `SESSION_SECRET` dùng chung),
+seed tài khoản admin, cron dọn token và checklist kiểm tra sau khi deploy.

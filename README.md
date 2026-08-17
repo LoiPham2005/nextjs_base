@@ -357,6 +357,11 @@ bằng tài khoản mẫu của bộ seed đó.
 
 ## Deploy
 
+📘 **Hướng dẫn từng bước đầy đủ: [docs/DEPLOY_VPS.md](docs/DEPLOY_VPS.md)** — chuẩn bị
+máy chủ, file môi trường, cả ba cách deploy, danh sách kiểm tra sau khi lên, sao
+lưu và rollback. Dùng Coolify thì xem [docs/DEPLOY_COOLIFY.md](docs/DEPLOY_COOLIFY.md).
+Mục dưới đây chỉ tóm tắt.
+
 Hỗ trợ hai cách, chọn một:
 
 |              | **Docker**                            | **VPS trực tiếp**                |

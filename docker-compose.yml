@@ -43,6 +43,39 @@ services:
       postgres:
         condition: service_healthy
 
+  # Container dùng-một-lần để chạy tác vụ vận hành: dọn token, seed dữ liệu nền,
+  # kiểm tra trạng thái migration.
+  #
+  #   docker compose run --rm tools pnpm db:purge
+  #   docker compose run --rm tools pnpm db:seed:prod
+  #
+  # KHÔNG chạy tự động — nằm sau profile `tools` nên `docker compose up` bỏ qua
+  # hoàn toàn. Gọi theo lịch bằng cron của MÁY CHỦ (xem docs/DEPLOY_VPS.md).
+  #
+  # Vì sao dùng stage `builder` chứ không phải `runner` hay `migrator`: các tác
+  # vụ này chạy bằng tsx và cần cả `src/` lẫn tầng service. Bản standalone của
+  # `runner` không có `src/`, còn `migrator` cố ý chỉ có Prisma CLI. `builder`
+  # là stage trung gian đã được dựng sẵn khi build `runner`, nên tái dùng nó
+  # gần như không tốn thêm gì.
+  #
+  # Vì sao không viết thẳng câu DELETE vào đây: điều kiện xoá nằm trong
+  # `tokenService.purgeExpired()` và `verificationService.purgeExpired()`. Chép
+  # lại thành SQL là tạo ra nguồn sự thật thứ hai, và hai bên sẽ lệch nhau.
+  tools:
+    profiles: ["tools"]
+    build:
+      context: .
+      target: builder
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   web:
     build:
       context: .
@@ -56,6 +89,18 @@ services:
       <<: *database-url
       NODE_ENV: production
       PORT: 3000
+      # Khai báo tường minh, giống service `realtime`, thay vì chỉ trông vào
+      # `env_file` (vốn `required: false` nên vắng mặt cũng không ai báo).
+      #
+      # Hai lý do:
+      #   - Nền tảng như Coolify truyền biến qua môi trường chứ không chắc có
+      #     tạo file `.env` cạnh compose. Dòng này khiến `web` lấy được biến
+      #     theo cả hai đường.
+      #   - `:?` bắt compose DỪNG ngay khi thiếu, kèm tên biến. Không có nó thì
+      #     container vẫn dựng rồi mới chết lúc khởi động.
+      #
+      # ⚠️ Phải cùng giá trị với `realtime`: web cấp token, realtime verify.
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET là bắt buộc}
       # Rate limit dùng chung giữa các instance. Cùng một Redis với realtime —
       # khoá của rate limit mang tiền tố riêng nên hai bên không giẫm lên nhau.
       REDIS_URL: redis://redis:6379

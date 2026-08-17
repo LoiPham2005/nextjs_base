@@ -19,23 +19,45 @@ example.com {
 		max_size 10MB
 	}
 
-	reverse_proxy 127.0.0.1:3000 {
-		# QUAN TRỌNG — đây là chỗ dễ sai nhất của cả file.
-		#
-		# Mặc định Caddy NỐI THÊM IP client vào X-Forwarded-For đã có sẵn.
-		# Nghĩa là client tự gửi kèm "X-Forwarded-For: 1.2.3.4" thì app đọc
-		# được giá trị giả đó và né sạch rate limit đăng nhập.
-		#
-		# `{remote_host}` là IP thật mà Caddy nhìn thấy ở tầng TCP, và
-		# `header_up` với một giá trị sẽ GHI ĐÈ chứ không nối thêm.
-		header_up X-Forwarded-For {remote_host}
-		header_up X-Real-IP {remote_host}
+	# ---------------------------------------------------------------------
+	# WebSocket → tiến trình realtime (cổng 3002)
+	#
+	# ⚠️ Khối này từng THIẾU, và hậu quả rất khó đoán: tiến trình realtime chạy
+	# bình thường, `systemctl status` xanh, log không có gì — nhưng client từ
+	# Internet không có đường nào tới nó, vì proxy đẩy hết mọi thứ sang cổng
+	# 3000. Người dùng chỉ thấy WebSocket không kết nối được.
+	#
+	# `/socket.io/*` là đường dẫn mặc định của Socket.IO. Đổi `path` phía client
+	# thì phải đổi cả ở đây.
+	#
+	# Caddy tự xử lý HTTP Upgrade nên không cần khai báo gì thêm cho WebSocket.
+	# ---------------------------------------------------------------------
+	handle /socket.io/* {
+		reverse_proxy 127.0.0.1:3002 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
 
-		# Không nhận response lỗi từ app rồi tự thay bằng trang lỗi của Caddy:
-		# API phải trả đúng JSON và status code mà route handler đã dựng.
-		health_uri /api/health
-		health_interval 30s
-		health_timeout 5s
+	handle {
+		reverse_proxy 127.0.0.1:3000 {
+			# QUAN TRỌNG — đây là chỗ dễ sai nhất của cả file.
+			#
+			# Mặc định Caddy NỐI THÊM IP client vào X-Forwarded-For đã có sẵn.
+			# Nghĩa là client tự gửi kèm "X-Forwarded-For: 1.2.3.4" thì app đọc
+			# được giá trị giả đó và né sạch rate limit đăng nhập.
+			#
+			# `{remote_host}` là IP thật mà Caddy nhìn thấy ở tầng TCP, và
+			# `header_up` với một giá trị sẽ GHI ĐÈ chứ không nối thêm.
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Real-IP {remote_host}
+
+			# Không nhận response lỗi từ app rồi tự thay bằng trang lỗi của Caddy:
+			# API phải trả đúng JSON và status code mà route handler đã dựng.
+			health_uri /api/health
+			health_interval 30s
+			health_timeout 5s
+		}
 	}
 
 	# Header bảo mật (HSTS, CSP, X-Frame-Options...) do chính ứng dụng đặt
@@ -51,8 +73,13 @@ example.com {
 # Trong lúc chưa có domain, dùng khối này để test trên IP (HTTP, không TLS):
 #
 # :80 {
-# 	reverse_proxy 127.0.0.1:3000 {
-# 		header_up X-Forwarded-For {remote_host}
-# 		header_up X-Real-IP {remote_host}
+# 	handle /socket.io/* {
+# 		reverse_proxy 127.0.0.1:3002
+# 	}
+# 	handle {
+# 		reverse_proxy 127.0.0.1:3000 {
+# 			header_up X-Forwarded-For {remote_host}
+# 			header_up X-Real-IP {remote_host}
+# 		}
 # 	}
 # }

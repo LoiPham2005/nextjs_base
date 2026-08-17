@@ -123,6 +123,13 @@ nhật vào README**:
 
 ## Tài liệu khác trong `docs/`
 
+- [DEPLOY_COOLIFY.md](docs/DEPLOY_COOLIFY.md) — deploy bằng Coolify (self-hosted PaaS). Bắt buộc chọn build pack **Docker Compose**, vì dự án cần 5 service chạy cùng nhau.
+- [DEPLOY_VPS.md](docs/DEPLOY_VPS.md) — deploy lên VPS bằng Docker / systemd / PM2. Cả ba đường
+  đều chạy **hai** tiến trình (web + realtime); thiếu cái thứ hai thì WebSocket im lặng không hoạt
+  động. Caddyfile phải có khối `/socket.io/*` sang cổng 3002, nếu không realtime chạy mà không ai
+  tới được. PM2 mặc định 1 instance và **chặn** cluster khi thiếu `REDIS_URL` — nhiều tiến trình
+  không Redis là ngưỡng rate limit bị nhân lên, im lặng.
+
 - [GOTCHAS.md](docs/GOTCHAS.md) — bug/bẫy đã gặp thật + cách xử lý, đọc trước khi debug lỗi quen mặt.
 - [disaster-recovery.md](docs/disaster-recovery.md) — khôi phục backup, rollback deploy, xoay vòng secret, mất VPS.
 - [HUONG_DAN_CHON_CONG_NGHE_HA_TANG.md](docs/HUONG_DAN_CHON_CONG_NGHE_HA_TANG.md) — so sánh database/object-storage/VPS managed (Neon, Supabase, R2, VPS Việt Nam...) kèm giá thật đã kiểm chứng.
