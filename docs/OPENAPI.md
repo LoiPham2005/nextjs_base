@@ -1,59 +1,138 @@
-# Hướng dẫn sử dụng OpenAPI & REST API Documentation
+# Hướng dẫn sử dụng OpenAPI, Scalar UI & Code Generation cho Mobile (Flutter / Dart)
 
-Tài liệu này hướng dẫn cách truy cập, xem và kiểm thử hệ thống REST API (`/api/v1/**`) của dự án thông qua chuẩn **OpenAPI 3.0**.
+Tài liệu này hướng dẫn cách truy cập, xem tài liệu trực quan trên Web, Import vào Postman và **Tự động sinh mã nguồn (Code Gen) trọn gói cho Flutter/Dart** từ chuẩn **OpenAPI 3.1** của dự án.
 
 ---
 
-## 1. Đường dẫn Endpoint OpenAPI
+## 1. Đường dẫn Endpoint OpenAPI & Docs
 
 Khi ứng dụng đang chạy (`pnpm dev` hoặc `make dev`):
 
-- **OpenAPI JSON Spec URL:**  
+- **Trang giao diện trực quan (Dành cho Người xem & Test API trực tiếp):**  
+  👉 `http://localhost:3000/docs` *(Giao diện Scalar UI hiện đại, mượt mà, hỗ trợ Dark/Light Mode)*
+- **OpenAPI JSON Spec (Dành cho Postman / Tool Code Gen):**  
   👉 `http://localhost:3000/api/v1/openapi.json`
-- **File sinh tự động:** `src/lib/openapi/registry.ts`  
-  *(Tự động đồng bộ 100% với Zod Schema trong `src/schemas/*.ts`, không bao giờ bị lệch dữ liệu).*
+- **File sinh đặc tả từ Backend:** `src/lib/openapi/registry.ts` *(Tự động đồng bộ 100% với Zod Schema trong `src/schemas/*.ts`)*
 
 ---
 
-## 2. Cách xem và kiểm thử (Test API)
+## 2. Cách xem và kiểm thử nhanh (Test API)
 
-### Cách 1: Import vào Postman / Insomnia (Khuyên dùng)
+### Cách 1: Xem và gọi thử trực tiếp trên Web (`/docs`)
+1. Mở trình duyệt vào `http://localhost:3000/docs`.
+2. Chọn bất kỳ API nào (ví dụ: `POST /api/v1/auth/login`).
+3. Bấm **"Test Request"** / **"Send"** để gửi request trực tiếp trên trình duyệt.
+
+---
+
+### Cách 2: Import vào Postman / Insomnia (1 Click)
 1. Mở **Postman** hoặc **Insomnia**.
 2. Chọn nút **Import** ở góc trên bên trái.
 3. Chọn tab **Link / URL** và dán:
    ```text
    http://localhost:3000/api/v1/openapi.json
    ```
-4. Bấm **Import**. Toàn bộ danh sách API sẽ được tự động tạo kèm:
-   - Các Headers (`Authorization: Bearer <token>`).
+4. Bấm **Import**. Postman sẽ tự động tạo một Collection gồm đầy đủ:
+   - Toàn bộ danh sách Endpoint kèm HTTP Method (`GET`, `POST`, `PATCH`, `DELETE`).
    - Request Body mẫu (đầy đủ các trường validate bởi Zod).
+   - Header `Authorization: Bearer <token>`.
    - Danh sách Status Code và Error response (`401`, `403`, `422`, `500`).
 
 ---
 
-### Cách 2: Xem giao diện Swagger UI trực tuyến
-1. Truy cập [editor.swagger.io](https://editor.swagger.io/).
-2. Chọn **File** ➡️ **Import URL**.
-3. Dán link `http://localhost:3000/api/v1/openapi.json` và bấm **OK**.
-4. Giao diện Swagger trực quan sẽ hiển thị đầy đủ schema và cho phép gọi thử API trực tiếp.
+## 3. Hướng dẫn chi tiết: Tự động sinh mã nguồn (Code Gen) cho Flutter / Dart
+
+Bạn không cần phải viết tay các file Model (`User`, `LoginResponse`...) hay API Services trong Flutter. Hãy để công cụ tự động sinh từ file `openapi.json`.
+
+### Bước 1: Mở Terminal tại thư mục dự án Flutter của bạn
+Đảm bảo bạn đang đứng ở thư mục gốc của dự án Flutter (nơi có file `pubspec.yaml`).
+
+### Bước 2: Chạy lệnh sinh Code (Dùng `openapi-generator-cli`)
+Chạy một trong các lệnh sau tùy theo HTTP Client mà bạn sử dụng:
+
+#### ⚡ Cách 1: Dùng `Dio` (Khuyên dùng cho Flutter)
+```bash
+npx @openapitools/openapi-generator-cli generate \
+  -i http://localhost:3000/api/v1/openapi.json \
+  -g dart-dio \
+  -o ./lib/core/api_client \
+  --additional-properties=pubName=api_client
+```
+
+#### ⚡ Cách 2: Dùng `http` chuẩn của Dart
+```bash
+npx @openapitools/openapi-generator-cli generate \
+  -i http://localhost:3000/api/v1/openapi.json \
+  -g dart \
+  -o ./lib/core/api_client
+```
 
 ---
 
-### Cách 3: Sinh Model & API Client tự động cho Mobile (Flutter / React Native)
-Bạn có thể dùng công cụ sinh code tự động từ file OpenAPI spec:
+### Bước 3: Cài đặt Dependencies trong `pubspec.yaml` (nếu cần)
+Nếu dùng `dart-dio`, thêm các package sau vào `pubspec.yaml` của Flutter:
+```yaml
+dependencies:
+  dio: ^5.7.0
+  built_value: ^8.9.2
+  built_collection: ^5.1.1
 
-- **Dành cho Flutter / Dart (`openapi-generator`):**
-  ```bash
-  openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart-dio -o ./lib/api_client
-  ```
-- **Dành cho TypeScript / Web:**
-  ```bash
-  npx openapi-typescript http://localhost:3000/api/v1/openapi.json -o ./src/types/api-schema.d.ts
-  ```
+dev_dependencies:
+  build_runner: ^2.4.13
+  built_value_generator: ^8.9.2
+```
+Sau đó chạy:
+```bash
+flutter pub get
+dart run build_runner build --delete-conflicting-outputs
+```
 
 ---
 
-## 3. Danh sách các nhóm API chính
+### Bước 4: Sử dụng trong Code Flutter
+Sau khi sinh code, bạn có thể gọi API dễ dàng và có Type Safety 100%:
+
+```dart
+import 'package:your_app/core/api_client/lib/api.dart';
+import 'package:dio/dio.dart';
+
+void main() async {
+  final dio = Dio(BaseOptions(baseUrl: 'http://localhost:3000/api/v1'));
+  final api = Openapi(dio: dio);
+
+  try {
+    // 1. Gọi API Đăng nhập
+    final response = await api.getAuthApi().authLoginPost(
+      loginRequest: LoginRequestBuilder()
+        ..email = 'admin@example.com'
+        ..password = 'admin123456'
+    );
+
+    final accessToken = response.data?.accessToken;
+    print('Token: $accessToken');
+
+    // 2. Gọi API với Bearer Token
+    dio.options.headers['Authorization'] = 'Bearer $accessToken';
+    final userRes = await api.getAuthApi().authMeGet();
+    print('Current User: ${userRes.data?.user?.email}');
+  } catch (e) {
+    print('Error calling API: $e');
+  }
+}
+```
+
+---
+
+## 4. Tự động sinh TypeScript Types (Dành cho Web Client / React / Vue)
+Nếu bạn có một dự án Web Frontend khác muốn dùng chung API này:
+
+```bash
+npx openapi-typescript http://localhost:3000/api/v1/openapi.json -o ./src/types/api-schema.d.ts
+```
+
+---
+
+## 5. Bảng tổng hợp các Endpoint REST API (`/api/v1/**`)
 
 | Nhóm API | Endpoint | Quyền hạn | Mô tả |
 | :--- | :--- | :---: | :--- |
