@@ -79,9 +79,12 @@ export const apiErrors = {
     new ApiError(422, "VALIDATION_ERROR", "Dữ liệu gửi lên không hợp lệ", fields),
 };
 
-export function apiOk<T>(data: T, status = 200): NextResponse {
+export function apiSuccess<T>(data: T, status = 200): NextResponse {
   return NextResponse.json({ data }, { status });
 }
+
+/** Alias ngắn gọn của apiSuccess */
+export const apiOk = apiSuccess;
 
 /** Parse JSON body theo Zod schema; ném ApiError 422 nếu sai. */
 export async function parseJsonBody<T extends z.ZodType>(
