@@ -104,8 +104,6 @@ pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/a
 **Trên Linux / macOS (Dùng `npx` hoặc `pnpm dlx`):**
 
 ```bash
-<<<<<<< HEAD
-=======
 java -version
 ```
 
@@ -151,7 +149,6 @@ và shell báo lỗi ở chỗ trông chẳng liên quan gì.
 **macOS / Linux / Git Bash:**
 
 ```bash
->>>>>>> f8e85188cea1548043eafe4362a44dcddabc9a8b
 pnpm dlx @openapitools/openapi-generator-cli generate \
   -i http://localhost:3000/api/v1/openapi.json \
   -g dart-dio \
@@ -161,29 +158,13 @@ pnpm dlx @openapitools/openapi-generator-cli generate \
 
 **Windows PowerShell:**
 
-<<<<<<< HEAD
-**Trên Windows (CMD / PowerShell):**
-
-```cmd
-pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart -o ./lib/core/api_client
-```
-
-**Trên Linux / macOS:**
-
-````bash
-pnpm dlx @openapitools/openapi-generator-cli generate \
-  -i http://localhost:3000/api/v1/openapi.json \
-  -g dart \
-  -o ./lib/core/api_client
-=======
 ```powershell
 pnpm dlx @openapitools/openapi-generator-cli generate `
   -i http://localhost:3000/api/v1/openapi.json `
   -g dart-dio `
   -o ./packages/api_client `
   --additional-properties=pubName=api_client
->>>>>>> f8e85188cea1548043eafe4362a44dcddabc9a8b
-````
+```
 
 ⚠️ Backtick phải là ký tự **cuối cùng** của dòng. Thừa một dấu cách phía sau nó
 là PowerShell không hiểu là nối dòng nữa — lỗi này rất khó nhìn ra bằng mắt.
