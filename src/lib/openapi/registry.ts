@@ -1,9 +1,7 @@
 import "server-only";
-import {
-  extendZodWithOpenApi,
-  OpenAPIRegistry,
-  OpenApiGeneratorV31,
-} from "@asteasolutions/zod-to-openapi";
+// PHẢI đứng trước mọi import schema — xem ghi chú trong chính file đó.
+import "./zod-openapi";
+import { OpenAPIRegistry, OpenApiGeneratorV31 } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import {
   loginSchema,
@@ -29,12 +27,9 @@ import { API_PREFIX } from "@/lib/api/version";
  * nghĩa lại. Đây chính là bài học từ `src/types/api.ts` đã xoá trước đó: 2 nơi
  * mô tả cùng 1 hợp đồng thì sớm muộn cũng lệch nhau, một nơi thì không thể.
  *
- * `extendZodWithOpenApi` phải chạy TRƯỚC khi bất kỳ schema nào gọi `.openapi()`
- * — side-effect import này chỉ cần chạy 1 lần, ở đây là đủ vì mọi consumer đều
- * đi qua `getOpenApiDocument()`.
+ * Việc gắn `.openapi()` vào Zod nằm ở `./zod-openapi` và được import ở dòng
+ * đầu — thứ tự đó là bắt buộc, xem lý do trong file ấy.
  */
-extendZodWithOpenApi(z);
-
 const registry = new OpenAPIRegistry();
 
 // --- Response chung ---------------------------------------------------------
@@ -76,8 +71,46 @@ function errorResponses(...statuses: (401 | 403 | 404 | 409 | 422 | 423 | 429)[]
   );
 }
 
-function okResponse(schema: z.ZodTypeAny, description = "Thành công") {
-  return { 200: { description, content: { "application/json": { schema } } } };
+/**
+ * Response thành công. Nhận vào schema envelope ĐÃ đăng ký tên (xem `envelope`).
+ */
+function okResponse(envelopeSchema: z.ZodTypeAny, description = "Thành công") {
+  return {
+    200: { description, content: { "application/json": { schema: envelopeSchema } } },
+  };
+}
+
+/**
+ * Đăng ký một envelope `{ data: ... }` có TÊN.
+ *
+ * ---
+ * VÌ SAO LỚP BỌC PHẢI CÓ TRONG ĐẶC TẢ
+ *
+ * `apiSuccess()` luôn trả `{ "data": ... }` (xem `src/lib/api/response.ts`),
+ * nhưng bản trước khai schema THẲNG là kiểu bên trong. Đặc tả nói body là
+ * `TokenPair`, còn server thật sự trả `{ data: TokenPair }`.
+ *
+ * Hậu quả: mọi client sinh tự động — Dart, TypeScript, Kotlin — đều giải mã
+ * hỏng, kèm thông báo cực khó truy vì nó chỉ nói một trường nào đó bị null:
+ *
+ *     Tried to construct class "User" with null for non-nullable field "id"
+ *
+ * Không lỗi nào phía backend phát hiện được: unit test gọi thẳng service, còn
+ * `/docs` chỉ hiển thị lại chính đặc tả sai đó. Nó chỉ lộ ra khi một client
+ * THẬT giải mã response THẬT — bài test tích hợp trong `flutter_base2` đã bắt.
+ *
+ * ---
+ * VÌ SAO ĐẶT TÊN, VÀ VÌ SAO DÙNG LẠI
+ *
+ * Envelope viết inline sẽ khiến công cụ sinh code tự bịa tên theo đường dẫn:
+ * `AuthLoginPost200Response`, `UsersIdGet200Response`… Đặt tên một lần rồi dùng
+ * lại cho mọi endpoint cùng hình dạng thì client chỉ thấy `UserResponse` — và
+ * 7 endpoint trả về user dùng CHUNG một kiểu thay vì 7 kiểu giống hệt nhau.
+ *
+ * ⚠️ Tên là hợp đồng công khai. Đổi tên = breaking change với client đã sinh code.
+ */
+function envelope(name: string, dataSchema: z.ZodTypeAny) {
+  return registry.register(name, z.object({ data: dataSchema }));
 }
 
 const bearerAuth = registry.registerComponent("securitySchemes", "bearerAuth", {
@@ -138,6 +171,12 @@ const updateUserStatusRequestSchema = registry.register(
 const createRoleRequestSchema = registry.register("CreateRoleRequest", createRoleSchema);
 const updateRoleRequestSchema = registry.register("UpdateRoleRequest", updateRoleSchema);
 
+// --- Envelope response, đặt tên và dùng lại ---------------------------------
+
+const emptyResponse = envelope("EmptyResponse", z.object({}));
+const userResponse = envelope("UserResponse", z.object({ user: userSchemaRef }));
+const idResponse = envelope("IdResponse", z.object({ id: z.string() }));
+
 // --- Auth ---------------------------------------------------------------
 
 const tokenPairSchema = registry.register(
@@ -157,6 +196,8 @@ const tokenPairSchema = registry.register(
   }),
 );
 
+const tokenResponse = envelope("TokenResponse", tokenPairSchema);
+
 registry.registerPath({
   method: "post",
   path: "/auth/login",
@@ -164,7 +205,7 @@ registry.registerPath({
   summary: "Đăng nhập bằng email hoặc username",
   request: { body: { content: { "application/json": { schema: loginRequestSchema } } } },
   responses: {
-    ...okResponse(tokenPairSchema),
+    ...okResponse(tokenResponse),
     ...errorResponses(401, 422, 423, 429),
   },
 });
@@ -175,7 +216,7 @@ registry.registerPath({
   tags: ["Auth"],
   summary: "Tạo tài khoản mới — luôn gán vai trò USER",
   request: { body: { content: { "application/json": { schema: registerRequestSchema } } } },
-  responses: { ...okResponse(tokenPairSchema, "Tạo thành công"), ...errorResponses(409, 422, 429) },
+  responses: { ...okResponse(tokenResponse, "Tạo thành công"), ...errorResponses(409, 422, 429) },
 });
 
 registry.registerPath({
@@ -188,7 +229,7 @@ registry.registerPath({
       content: { "application/json": { schema: refreshRequestSchema } },
     },
   },
-  responses: { ...okResponse(tokenPairSchema), ...errorResponses(401, 429) },
+  responses: { ...okResponse(tokenResponse), ...errorResponses(401, 429) },
 });
 
 registry.registerPath({
@@ -197,7 +238,7 @@ registry.registerPath({
   tags: ["Auth"],
   security: [{ [bearerAuth.name]: [] }],
   summary: "Thu hồi refresh token hiện tại",
-  responses: { ...okResponse(z.object({}), "Đã đăng xuất"), ...errorResponses(401) },
+  responses: { ...okResponse(emptyResponse, "Đã đăng xuất"), ...errorResponses(401) },
 });
 
 registry.registerPath({
@@ -206,7 +247,7 @@ registry.registerPath({
   tags: ["Auth"],
   security: [{ [bearerAuth.name]: [] }],
   summary: "Hồ sơ user đang đăng nhập — luôn đọc lại từ database, không tin token",
-  responses: { ...okResponse(z.object({ user: userSchemaRef })), ...errorResponses(401, 404) },
+  responses: { ...okResponse(userResponse), ...errorResponses(401, 404) },
 });
 
 registry.registerPath({
@@ -216,7 +257,7 @@ registry.registerPath({
   security: [{ [bearerAuth.name]: [] }],
   summary: "Đổi mật khẩu khi đang đăng nhập",
   request: { body: { content: { "application/json": { schema: changePasswordRequestSchema } } } },
-  responses: { ...okResponse(z.object({}), "Đổi thành công"), ...errorResponses(401, 422, 429) },
+  responses: { ...okResponse(emptyResponse, "Đổi thành công"), ...errorResponses(401, 422, 429) },
 });
 
 registry.registerPath({
@@ -226,7 +267,7 @@ registry.registerPath({
   summary: "Gửi link đặt lại mật khẩu — LUÔN trả 200 dù email có tồn tại hay không",
   request: { body: { content: { "application/json": { schema: forgotPasswordRequestSchema } } } },
   responses: {
-    ...okResponse(z.object({}), "Đã gửi (nếu email tồn tại)"),
+    ...okResponse(emptyResponse, "Đã gửi (nếu email tồn tại)"),
     ...errorResponses(422, 429),
   },
 });
@@ -237,7 +278,7 @@ registry.registerPath({
   tags: ["Auth"],
   summary: "Đặt lại mật khẩu bằng token trong email",
   request: { body: { content: { "application/json": { schema: resetPasswordRequestSchema } } } },
-  responses: { ...okResponse(z.object({}), "Đặt lại thành công"), ...errorResponses(422, 429) },
+  responses: { ...okResponse(emptyResponse, "Đặt lại thành công"), ...errorResponses(422, 429) },
 });
 
 registry.registerPath({
@@ -246,7 +287,7 @@ registry.registerPath({
   tags: ["Auth"],
   summary: "Xác thực email bằng token trong link",
   request: { body: { content: { "application/json": { schema: verifyEmailRequestSchema } } } },
-  responses: { ...okResponse(z.object({ user: userSchemaRef })), ...errorResponses(422) },
+  responses: { ...okResponse(userResponse), ...errorResponses(422) },
 });
 
 registry.registerPath({
@@ -255,7 +296,7 @@ registry.registerPath({
   tags: ["Auth"],
   security: [{ [bearerAuth.name]: [] }],
   summary: "Gửi lại email xác thực",
-  responses: { ...okResponse(z.object({}), "Đã gửi"), ...errorResponses(401, 429) },
+  responses: { ...okResponse(emptyResponse, "Đã gửi"), ...errorResponses(401, 429) },
 });
 
 const sessionSchema = z.object({
@@ -264,6 +305,11 @@ const sessionSchema = z.object({
   createdAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
 });
+
+const sessionsResponse = envelope(
+  "SessionsResponse",
+  z.object({ sessions: z.array(sessionSchema) }),
+);
 
 registry.registerPath({
   method: "get",
@@ -275,7 +321,7 @@ registry.registerPath({
     "Response không tự đánh dấu phiên hiện tại: client đối chiếu với `sessionId` " +
     "nhận được lúc đăng nhập/refresh (access token không mang thông tin đó).",
   responses: {
-    ...okResponse(z.object({ sessions: z.array(sessionSchema) })),
+    ...okResponse(sessionsResponse),
     ...errorResponses(401),
   },
 });
@@ -290,10 +336,18 @@ registry.registerPath({
     "người khác — phân biệt hai ca đó là xác nhận id có thật.",
   request: { params: z.object({ id: z.string() }) },
   responses: {
-    ...okResponse(z.object({ id: z.string() })),
+    ...okResponse(idResponse),
     ...errorResponses(401, 404),
   },
 });
+
+const usersListResponse = envelope(
+  "UsersListResponse",
+  z.object({
+    users: z.array(userSchemaRef),
+    pagination: z.object({ perPage: z.number(), nextCursor: z.string().nullable() }),
+  }),
+);
 
 // --- Users (ADMIN) --------------------------------------------------------
 
@@ -310,12 +364,7 @@ registry.registerPath({
     }),
   },
   responses: {
-    ...okResponse(
-      z.object({
-        users: z.array(userSchemaRef),
-        pagination: z.object({ perPage: z.number(), nextCursor: z.string().nullable() }),
-      }),
-    ),
+    ...okResponse(usersListResponse),
     ...errorResponses(401, 403),
   },
 });
@@ -328,7 +377,7 @@ registry.registerPath({
   summary: "Admin tạo user mới, được phép chỉ định vai trò",
   request: { body: { content: { "application/json": { schema: createUserRequestSchema } } } },
   responses: {
-    ...okResponse(z.object({ user: userSchemaRef }), "Tạo thành công"),
+    ...okResponse(userResponse, "Tạo thành công"),
     ...errorResponses(401, 403, 409, 422),
   },
 });
@@ -342,7 +391,7 @@ registry.registerPath({
   security: [{ [bearerAuth.name]: [] }],
   summary: "Xem 1 user — chính mình cần profile:read:own, xem người khác cần user:read",
   request: userIdParam,
-  responses: { ...okResponse(z.object({ user: userSchemaRef })), ...errorResponses(401, 403, 404) },
+  responses: { ...okResponse(userResponse), ...errorResponses(401, 403, 404) },
 });
 
 registry.registerPath({
@@ -358,7 +407,7 @@ registry.registerPath({
     body: { content: { "application/json": { schema: updateUserRequestSchema } } },
   },
   responses: {
-    ...okResponse(z.object({ user: userSchemaRef })),
+    ...okResponse(userResponse),
     ...errorResponses(401, 403, 404, 409, 422),
   },
 });
@@ -370,7 +419,7 @@ registry.registerPath({
   security: [{ [bearerAuth.name]: [] }],
   summary: "Xoá mềm user — không tự xoá được chính mình",
   request: userIdParam,
-  responses: { ...okResponse(z.object({ id: z.string() })), ...errorResponses(401, 403, 409) },
+  responses: { ...okResponse(idResponse), ...errorResponses(401, 403, 409) },
 });
 
 registry.registerPath({
@@ -384,7 +433,7 @@ registry.registerPath({
     body: { content: { "application/json": { schema: updateUserStatusRequestSchema } } },
   },
   responses: {
-    ...okResponse(z.object({ user: userSchemaRef })),
+    ...okResponse(userResponse),
     ...errorResponses(401, 403, 404, 409, 422),
   },
 });
@@ -396,7 +445,7 @@ registry.registerPath({
   security: [{ [bearerAuth.name]: [] }],
   summary: "Mở khoá sớm — xoá lockedUntil do brute-force thay vì đợi tự hết hạn",
   request: userIdParam,
-  responses: { ...okResponse(z.object({ user: userSchemaRef })), ...errorResponses(401, 403, 404) },
+  responses: { ...okResponse(userResponse), ...errorResponses(401, 403, 404) },
 });
 
 // --- Roles & phân quyền ---------------------------------------------------
@@ -419,6 +468,16 @@ const roleSchema = z.object({
   updatedAt: z.coerce.date(),
 });
 
+const roleResponse = envelope("RoleResponse", z.object({ role: roleSchema }));
+const roleKeyResponse = envelope("RoleKeyResponse", z.object({ key: z.string() }));
+const rolesListResponse = envelope(
+  "RolesListResponse",
+  z.object({
+    roles: z.array(roleSchema),
+    permissions: z.array(z.object({ key: z.string(), description: z.string() })),
+  }),
+);
+
 registry.registerPath({
   method: "get",
   path: "/roles",
@@ -428,12 +487,7 @@ registry.registerPath({
     "Danh sách vai trò kèm bảng phân quyền, VÀ danh mục quyền tồn tại. " +
     "Danh mục đến từ code (src/lib/permissions.ts), không phải database.",
   responses: {
-    ...okResponse(
-      z.object({
-        roles: z.array(roleSchema),
-        permissions: z.array(z.object({ key: z.string(), description: z.string() })),
-      }),
-    ),
+    ...okResponse(rolesListResponse),
     ...errorResponses(401, 403),
   },
 });
@@ -446,7 +500,7 @@ registry.registerPath({
   summary: "Tạo vai trò mới — key không đổi được sau khi tạo",
   request: { body: { content: { "application/json": { schema: createRoleRequestSchema } } } },
   responses: {
-    ...okResponse(z.object({ role: roleSchema }), "Tạo thành công"),
+    ...okResponse(roleResponse, "Tạo thành công"),
     ...errorResponses(401, 403, 409, 422),
   },
 });
@@ -460,7 +514,7 @@ registry.registerPath({
   security: [{ [bearerAuth.name]: [] }],
   summary: "Chi tiết một vai trò",
   request: roleKeyParam,
-  responses: { ...okResponse(z.object({ role: roleSchema })), ...errorResponses(401, 403, 404) },
+  responses: { ...okResponse(roleResponse), ...errorResponses(401, 403, 404) },
 });
 
 registry.registerPath({
@@ -476,7 +530,7 @@ registry.registerPath({
     body: { content: { "application/json": { schema: updateRoleRequestSchema } } },
   },
   responses: {
-    ...okResponse(z.object({ role: roleSchema })),
+    ...okResponse(roleResponse),
     ...errorResponses(401, 403, 404, 422),
   },
 });
@@ -489,7 +543,7 @@ registry.registerPath({
   summary: "Xoá vai trò — không xoá được vai trò hệ thống hoặc vai trò còn người dùng",
   request: roleKeyParam,
   responses: {
-    ...okResponse(z.object({ key: z.string() })),
+    ...okResponse(roleKeyResponse),
     ...errorResponses(401, 403, 404, 409),
   },
 });

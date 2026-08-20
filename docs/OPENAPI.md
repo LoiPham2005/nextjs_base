@@ -294,7 +294,7 @@ import 'package:dio/dio.dart';
 
 void main() async {
   final dio = Dio(BaseOptions(baseUrl: 'http://localhost:3000/api/v1'));
-  final api = Openapi(dio: dio);
+  final api = ApiClient(dio: dio);
 
   try {
     // 1. Gọi API Đăng nhập
@@ -308,13 +308,15 @@ void main() async {
         ..password = 'devpassword123'
     );
 
-    final accessToken = response.data?.accessToken;
+    // ⚠️ HAI lớp `data`: `response.data` là body HTTP, `.data` bên trong là
+    // envelope `{ data: ... }` mà API luôn bọc (xem src/lib/api/response.ts).
+    final accessToken = response.data?.data.accessToken;
     print('Token: $accessToken');
 
     // 2. Gọi API với Bearer Token
     dio.options.headers['Authorization'] = 'Bearer $accessToken';
     final userRes = await api.getAuthApi().authMeGet();
-    print('Current User: ${userRes.data?.user?.email}');
+    print('Current User: ${userRes.data?.data.user.email}');
   } catch (e) {
     print('Error calling API: $e');
   }
