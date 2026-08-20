@@ -56,8 +56,14 @@ Chạy một trong các lệnh sau tùy theo HTTP Client mà bạn sử dụng:
 
 #### ⚡ Cách 1: Dùng `Dio` (Khuyên dùng cho Flutter)
 
+**Trên Windows (CMD / PowerShell / Dùng `pnpm dlx`):**
+```cmd
+pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart-dio -o ./lib/core/api_client --additional-properties=pubName=api_client
+```
+
+**Trên Linux / macOS (Dùng `npx` hoặc `pnpm dlx`):**
 ```bash
-npx @openapitools/openapi-generator-cli generate \
+pnpm dlx @openapitools/openapi-generator-cli generate \
   -i http://localhost:3000/api/v1/openapi.json \
   -g dart-dio \
   -o ./lib/core/api_client \
@@ -66,8 +72,14 @@ npx @openapitools/openapi-generator-cli generate \
 
 #### ⚡ Cách 2: Dùng `http` chuẩn của Dart
 
+**Trên Windows (CMD / PowerShell):**
+```cmd
+pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart -o ./lib/core/api_client
+```
+
+**Trên Linux / macOS:**
 ```bash
-npx @openapitools/openapi-generator-cli generate \
+pnpm dlx @openapitools/openapi-generator-cli generate \
   -i http://localhost:3000/api/v1/openapi.json \
   -g dart \
   -o ./lib/core/api_client
