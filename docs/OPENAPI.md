@@ -52,26 +52,117 @@ Bạn không cần phải viết tay các file Model (`User`, `LoginResponse`...
 
 ### Bước 2: Chạy lệnh sinh Code (Dùng `openapi-generator-cli`)
 
-Chạy một trong các lệnh sau tùy theo HTTP Client mà bạn sử dụng:
+#### ⚠️ Điều kiện tiên quyết: máy phải có Java 11 trở lên
 
-#### ⚡ Cách 1: Dùng `Dio` (Khuyên dùng cho Flutter)
+`@openapitools/openapi-generator-cli` **không phải** công cụ Node. Nó chỉ là lớp
+vỏ mỏng bọc quanh một file JAR viết bằng Java — gói npm chỉ lo tải JAR về rồi
+gọi `java -jar`. Thiếu Java thì lệnh chết ngay, và thông báo lỗi thường không
+nói thẳng ra điều đó.
+
+Kiểm tra trước:
 
 ```bash
-npx @openapitools/openapi-generator-cli generate \
+java -version
+```
+
+Chưa có thì cài:
+
+| Hệ điều hành | Lệnh cài                                   |
+| ------------ | ------------------------------------------ |
+| macOS        | `brew install openjdk@21`                  |
+| Windows      | `winget install Microsoft.OpenJDK.21`      |
+| Ubuntu       | `sudo apt install openjdk-21-jre-headless` |
+
+#### Cách chắc chắn nhất: viết lệnh trên MỘT dòng
+
+Cách này chạy được ở **mọi** shell — macOS, Linux, PowerShell, CMD — vì nó
+không dùng ký tự nối dòng nào cả. Nếu bạn chỉ muốn lệnh chạy được và không
+quan tâm nó dài, dùng cách này:
+
+**Dùng `Dio`** (khuyên dùng cho Flutter):
+
+```bash
+pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart-dio -o ./lib/core/api_client --additional-properties=pubName=api_client
+```
+
+**Dùng `http` chuẩn của Dart:**
+
+```bash
+pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart -o ./lib/core/api_client
+```
+
+#### Muốn xuống dòng cho dễ đọc: ký tự nối dòng KHÁC nhau theo shell
+
+Đây là nguyên nhân phổ biến nhất khiến lệnh copy từ tài liệu Linux dán vào
+Windows thì hỏng. Dấu `\` chỉ có ý nghĩa nối dòng trong bash/zsh; PowerShell và
+CMD dùng ký tự khác, nên khi dán vào chúng, lệnh bị vỡ thành nhiều mảnh rời rạc
+và shell báo lỗi ở chỗ trông chẳng liên quan gì.
+
+| Shell                                   | Ký tự nối dòng     |
+| --------------------------------------- | ------------------ |
+| bash / zsh (macOS, Linux, **Git Bash**) | `\`                |
+| PowerShell                              | `` ` `` (backtick) |
+| CMD (`cmd.exe`)                         | `^`                |
+
+**macOS / Linux / Git Bash:**
+
+```bash
+pnpm dlx @openapitools/openapi-generator-cli generate \
   -i http://localhost:3000/api/v1/openapi.json \
   -g dart-dio \
   -o ./lib/core/api_client \
   --additional-properties=pubName=api_client
 ```
 
-#### ⚡ Cách 2: Dùng `http` chuẩn của Dart
+**Windows PowerShell:**
+
+```powershell
+pnpm dlx @openapitools/openapi-generator-cli generate `
+  -i http://localhost:3000/api/v1/openapi.json `
+  -g dart-dio `
+  -o ./lib/core/api_client `
+  --additional-properties=pubName=api_client
+```
+
+⚠️ Backtick phải là ký tự **cuối cùng** của dòng. Thừa một dấu cách phía sau nó
+là PowerShell không hiểu là nối dòng nữa — lỗi này rất khó nhìn ra bằng mắt.
+
+**Windows CMD:**
+
+```bat
+pnpm dlx @openapitools/openapi-generator-cli generate ^
+  -i http://localhost:3000/api/v1/openapi.json ^
+  -g dart-dio ^
+  -o ./lib/core/api_client ^
+  --additional-properties=pubName=api_client
+```
+
+#### `npx` hay `pnpm dlx`?
+
+Hai lệnh này làm cùng một việc: tải một gói về chạy tạm rồi bỏ. Tài liệu này
+dùng `pnpm dlx` vì dự án đã khoá trình quản lý gói bằng trường `packageManager`
+trong `package.json` — dùng nhất quán một công cụ thì bớt một thứ phải nghĩ.
+
+Nếu `npx` báo lỗi trên Windows (đã gặp thật), đổi sang `pnpm dlx` là cách khắc
+phục nhanh nhất. Ngược lại nếu máy chưa có pnpm thì `npx` vẫn dùng được:
 
 ```bash
-npx @openapitools/openapi-generator-cli generate \
-  -i http://localhost:3000/api/v1/openapi.json \
-  -g dart \
-  -o ./lib/core/api_client
+npx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart-dio -o ./lib/core/api_client --additional-properties=pubName=api_client
 ```
+
+#### ⚠️ `localhost` khi chạy trên máy ảo Android hoặc thiết bị thật
+
+Lệnh sinh code ở trên chạy trên MÁY TÍNH nên `localhost` là đúng. Nhưng URL bạn
+điền vào `BaseOptions(baseUrl: ...)` trong Flutter thì khác:
+
+| Chạy ở đâu      | Địa chỉ tới máy tính của bạn   |
+| --------------- | ------------------------------ |
+| Máy ảo Android  | `http://10.0.2.2:3000`         |
+| Máy ảo iOS      | `http://localhost:3000`        |
+| Điện thoại thật | `http://<IP-LAN-của-máy>:3000` |
+
+Với điện thoại thật, `pnpm dev` phải lắng nghe trên mọi địa chỉ:
+`pnpm dev -- -H 0.0.0.0`.
 
 ---
 
@@ -113,10 +204,14 @@ void main() async {
 
   try {
     // 1. Gọi API Đăng nhập
+    //
+    // ⚠️ Trường là `identifier`, KHÔNG phải `email` — một ô nhận cả email lẫn
+    // tên đăng nhập (xem `loginSchema` trong src/schemas/auth.schema.ts).
+    // Gửi `email` thì server trả 422 và thông báo lỗi trỏ vào `identifier`.
     final response = await api.getAuthApi().authLoginPost(
       loginRequest: LoginRequestBuilder()
-        ..email = 'admin@example.com'
-        ..password = 'admin123456'
+        ..identifier = 'dev.admin@example.com'
+        ..password = 'devpassword123'
     );
 
     final accessToken = response.data?.accessToken;
@@ -139,8 +234,31 @@ void main() async {
 Nếu bạn có một dự án Web Frontend khác muốn dùng chung API này:
 
 ```bash
-npx openapi-typescript http://localhost:3000/api/v1/openapi.json -o ./src/types/api-schema.d.ts
+pnpm dlx openapi-typescript http://localhost:3000/api/v1/openapi.json -o ./src/types/api-schema.d.ts
 ```
+
+Lệnh này chạy giống nhau ở macOS, Linux và Windows vì nó nằm gọn trên một dòng.
+Khác với `openapi-generator-cli`, `openapi-typescript` là công cụ Node thuần —
+**không cần Java**.
+
+---
+
+## 4b. Lệnh sinh code báo lỗi — tra ở đây trước
+
+| Thông báo bạn thấy                                                           | Nguyên nhân thật                                                                           |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `Error: Unable to access jarfile` · `'java' is not recognized` · `JAVA_HOME` | **Chưa cài Java.** `openapi-generator-cli` là vỏ Node bọc file JAR — xem Bước 2.           |
+| PowerShell: `The token '\' is not a valid statement separator`               | Dán lệnh dùng `\` của bash vào PowerShell. Đổi sang backtick, hoặc dùng bản một dòng.      |
+| CMD: `'-i' is not recognized as an internal or external command`             | Cùng nguyên nhân trên, ở CMD. Đổi `\` thành `^`.                                           |
+| PowerShell nối dòng vẫn lỗi dù đã dùng backtick                              | Có **dấu cách thừa** sau backtick. Nó phải là ký tự cuối dòng, không có gì phía sau.       |
+| `ECONNREFUSED` · `connect ECONNREFUSED 127.0.0.1:3000`                       | Server Next chưa chạy. Bật `pnpm dev` ở một cửa sổ khác rồi thử lại.                       |
+| `404` khi tải `openapi.json`                                                 | Sai đường dẫn — phải có `/v1`: `/api/v1/openapi.json`.                                     |
+| Sinh code xong nhưng thiếu endpoint mới thêm                                 | Đặc tả sinh lúc chạy từ Zod schema. Khởi động lại `pnpm dev` rồi sinh lại.                 |
+| Windows: `EPERM` · `path too long`                                           | Đường dẫn Windows giới hạn 260 ký tự. Chuyển dự án lên gần gốc ổ đĩa (ví dụ `C:\src\app`). |
+
+Vẫn không được thì bỏ hẳn công cụ sinh code: mở
+`http://localhost:3000/docs`, xem hợp đồng API rồi viết model bằng tay. Với một
+dự án chỉ dùng vài endpoint, cách đó nhiều khi còn nhanh hơn.
 
 ---
 
