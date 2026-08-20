@@ -50,6 +50,40 @@ Bạn không cần phải viết tay các file Model (`User`, `LoginResponse`...
 
 Đảm bảo bạn đang đứng ở thư mục gốc của dự án Flutter (nơi có file `pubspec.yaml`).
 
+#### ⚠️ Đặt code sinh ra ở `packages/`, KHÔNG phải trong `lib/`
+
+Với `--additional-properties=pubName=api_client`, generator **không sinh ra vài
+file lẻ** — nó sinh ra một **package Dart hoàn chỉnh**, có `pubspec.yaml`,
+`analysis_options.yaml`, `.gitignore` và `test/` riêng.
+
+Một package có `pubspec.yaml` riêng nằm bên trong `lib/` là sai về cấu trúc, và
+hỏng theo cách rất cụ thể: `flutter pub get` **không** cài dependency khai báo
+trong pubspec lồng nhau. Package sinh ra cần `built_value`, `built_collection`,
+`one_of` — muốn code trong `lib/` chạy được, bạn buộc phải thêm cả ba vào
+pubspec của ỨNG DỤNG, tức là trộn thẳng một bộ thư viện của thư viện con vào
+danh sách dependency của app.
+
+Cách đúng — để nó là một package thật, khai báo bằng path dependency:
+
+```
+your_flutter_app/
+├── lib/              ← code của bạn
+├── packages/
+│   └── api_client/   ← code sinh ra, KHÔNG sửa tay
+└── pubspec.yaml
+```
+
+```yaml
+# pubspec.yaml của app
+dependencies:
+  api_client:
+    path: packages/api_client
+```
+
+Lợi ích kèm theo: dependency riêng của client (`built_value`, `one_of`) nằm gọn
+trong package con, không lẫn vào app; và sinh lại code chỉ cần xoá đúng một thư
+mục, không sợ xoá nhầm code tay.
+
 ### Bước 2: Chạy lệnh sinh Code (Dùng `openapi-generator-cli`)
 
 #### ⚠️ Điều kiện tiên quyết: máy phải có Java 11 trở lên
@@ -82,13 +116,13 @@ quan tâm nó dài, dùng cách này:
 **Dùng `Dio`** (khuyên dùng cho Flutter):
 
 ```bash
-pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart-dio -o ./lib/core/api_client --additional-properties=pubName=api_client
+pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart-dio -o ./packages/api_client --additional-properties=pubName=api_client
 ```
 
 **Dùng `http` chuẩn của Dart:**
 
 ```bash
-pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart -o ./lib/core/api_client
+pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart -o ./packages/api_client
 ```
 
 #### Muốn xuống dòng cho dễ đọc: ký tự nối dòng KHÁC nhau theo shell
@@ -110,7 +144,7 @@ và shell báo lỗi ở chỗ trông chẳng liên quan gì.
 pnpm dlx @openapitools/openapi-generator-cli generate \
   -i http://localhost:3000/api/v1/openapi.json \
   -g dart-dio \
-  -o ./lib/core/api_client \
+  -o ./packages/api_client \
   --additional-properties=pubName=api_client
 ```
 
@@ -120,7 +154,7 @@ pnpm dlx @openapitools/openapi-generator-cli generate \
 pnpm dlx @openapitools/openapi-generator-cli generate `
   -i http://localhost:3000/api/v1/openapi.json `
   -g dart-dio `
-  -o ./lib/core/api_client `
+  -o ./packages/api_client `
   --additional-properties=pubName=api_client
 ```
 
@@ -133,7 +167,7 @@ là PowerShell không hiểu là nối dòng nữa — lỗi này rất khó nh�
 pnpm dlx @openapitools/openapi-generator-cli generate ^
   -i http://localhost:3000/api/v1/openapi.json ^
   -g dart-dio ^
-  -o ./lib/core/api_client ^
+  -o ./packages/api_client ^
   --additional-properties=pubName=api_client
 ```
 
@@ -147,7 +181,7 @@ Nếu `npx` báo lỗi trên Windows (đã gặp thật), đổi sang `pnpm dlx`
 phục nhanh nhất. Ngược lại nếu máy chưa có pnpm thì `npx` vẫn dùng được:
 
 ```bash
-npx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart-dio -o ./lib/core/api_client --additional-properties=pubName=api_client
+npx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart-dio -o ./packages/api_client --additional-properties=pubName=api_client
 ```
 
 #### ⚠️ `localhost` khi chạy trên máy ảo Android hoặc thiết bị thật
@@ -165,6 +199,66 @@ Với điện thoại thật, `pnpm dev` phải lắng nghe trên mọi địa c
 `pnpm dev -- -H 0.0.0.0`.
 
 ---
+
+### ⚠️ Trước khi dùng: dart-dio ép bạn dùng `built_value`, không phải `freezed`
+
+Đây **không phải lựa chọn**. Generator `dart-dio` sinh model theo `built_value`,
+chấm hết — `pubspec.yaml` của package sinh ra phụ thuộc `built_value` +
+`built_collection`, và mọi model đều mang `@BuiltValue()`.
+
+Nghĩa là nếu dự án Flutter của bạn đã dùng `freezed` + `json_serializable` (như
+`flutter_base2`), thêm client này vào là có **hai hệ sinh model song song**
+trong cùng một app: hai bộ annotation, hai generator, hai lần `build_runner`
+chạy lâu hơn.
+
+Cân nhắc trước khi quyết định:
+
+|                                         | Sinh tự động (`dart-dio`)        | Viết tay (`retrofit` + `freezed`) |
+| --------------------------------------- | -------------------------------- | --------------------------------- |
+| Công sức ban đầu                        | Gần bằng 0                       | Mỗi endpoint vài phút             |
+| Đồng bộ với backend                     | Sinh lại là xong                 | Phải tự nhớ sửa                   |
+| Hệ serialization                        | `built_value` (thêm mới)         | `freezed` (đã có)                 |
+| Tên class                               | Máy đặt, thường xấu              | Bạn đặt                           |
+| Đi qua interceptor sẵn có               | Được, nếu truyền Dio của bạn vào | Mặc định đã đi                    |
+| Chỉ dùng 5–10 endpoint                  | Thừa                             | Hợp lý                            |
+| Dùng 50+ endpoint, backend đổi liên tục | Rất đáng                         | Mệt                               |
+
+**Gợi ý:** dự án đã có `retrofit` + `freezed` và chỉ gọi vài chục endpoint thì
+viết tay theo mẫu sẵn có gọn hơn. Chọn sinh tự động khi số endpoint lớn, hoặc
+khi backend thay đổi thường xuyên tới mức việc tự nhớ đồng bộ là gánh nặng thật.
+
+Dù chọn cách nào, `/docs` và `openapi.json` vẫn có giá trị: nó là hợp đồng API
+luôn khớp code, dùng để tra cứu và để kiểm chứng model viết tay.
+
+### 💡 Tên class sinh ra xấu? Sửa ở BACKEND, không phải ở Flutter
+
+Nếu sinh code mà nhận được những cái tên như `AuthLoginPostRequest`,
+`AuthMeGet200ResponseUser`, `RolesKeyPatchRequest` — đó **không phải lỗi của
+generator**. Nó đang tự bịa tên vì đặc tả OpenAPI mô tả schema đó **inline**,
+không đặt tên.
+
+So sánh trong chính dự án này:
+
+| Tên sinh ra             | Vì sao                                             |
+| ----------------------- | -------------------------------------------------- |
+| `ApiError`, `TokenPair` | Backend có gọi `registry.register("TokenPair", …)` |
+| `AuthLoginPostRequest`  | Schema viết inline, không đăng ký tên              |
+
+Cách sửa nằm ở `src/lib/openapi/registry.ts` — đăng ký tên cho schema:
+
+```ts
+const loginRequestSchema = registry.register("LoginRequest", loginSchema);
+
+registry.registerPath({
+  method: "post",
+  path: "/auth/login",
+  request: { body: { content: { "application/json": { schema: loginRequestSchema } } } },
+  // …
+});
+```
+
+Sinh lại là có `LoginRequest` thay vì `AuthLoginPostRequest`. Sửa một lần ở
+backend, mọi client (Dart, TypeScript, Kotlin…) đều hưởng.
 
 ### Bước 3: Cài đặt Dependencies trong `pubspec.yaml` (nếu cần)
 
