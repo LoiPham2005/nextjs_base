@@ -72,6 +72,28 @@ fi
 step "Khởi động / Reload PM2"
 if [ -f "$ECOSYSTEM_FILE" ]; then
 	pm2 startOrReload "$ECOSYSTEM_FILE" --env production --update-env
+
+	# Gỡ tiến trình vừa bị tắt bằng cờ (QUEUE_ENABLED / REALTIME_ENABLED).
+	#
+	# `pm2 startOrReload` CHỈ đụng tới app có trong file cấu hình. App đã bị lọc
+	# ra khỏi `ecosystem.config.cjs` thì nó không biết tới, nên tiến trình cũ
+	# vẫn chạy tiếp như chưa có gì xảy ra — đúng thứ ta vừa bảo nó tắt, và
+	# `pm2 list` vẫn hiện "online" nên chẳng ai nghi ngờ.
+	#
+	# Docker không có vấn đề này (`replicas: 0` là compose tự gỡ container),
+	# systemd thì phải `systemctl disable --now`. Chỉ PM2 cần dọn tay.
+	configured=$(node -e 'console.log(require("./ecosystem.config.cjs").apps.map((a) => a.name).join(" "))')
+	for app in nextjs-base-realtime nextjs-base-worker; do
+		case " $configured " in
+		*" $app "*) ;;
+		*)
+			if pm2 delete "$app" >/dev/null 2>&1; then
+				printf '  đã gỡ %s (bị tắt bằng cờ)\n' "$app"
+			fi
+			;;
+		esac
+	done
+
 	pm2 save
 else
 	fail "Không tìm thấy file cấu hình PM2: $ECOSYSTEM_FILE"

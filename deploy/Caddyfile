@@ -31,6 +31,11 @@ example.com {
 	# thì phải đổi cả ở đây.
 	#
 	# Caddy tự xử lý HTTP Upgrade nên không cần khai báo gì thêm cho WebSocket.
+	#
+	# ⚠️ Chạy với `REALTIME_ENABLED=0` (dự án không dùng WebSocket) thì XOÁ cả
+	# khối này. Để lại mà không có tiến trình nào nghe cổng 3002 thì Caddy trả
+	# **502 Bad Gateway** — trông y như dịch vụ đang hỏng. Xoá đi thì đường dẫn
+	# rơi vào `handle` chung và trả 404, đúng với sự thật: ở đây không có gì.
 	# ---------------------------------------------------------------------
 	handle /socket.io/* {
 		reverse_proxy 127.0.0.1:3002 {

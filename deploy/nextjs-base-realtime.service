@@ -10,6 +10,11 @@
 # là realtime im lặng không hoạt động. Đường Docker và PM2 đều có, chỉ systemd
 # bỏ sót.
 #
+# ⚠️ DỰ ÁN KHÔNG DÙNG WEBSOCKET (`REALTIME_ENABLED=0`): tắt Ở TẦNG UNIT —
+# `sudo systemctl disable --now nextjs-base-realtime` — chứ đừng chỉ sửa biến
+# môi trường. Tiến trình có tự thoát kèm lời giải thích, nhưng `Restart=always`
+# bật lại nó ngay. Nhớ xoá luôn khối `/socket.io/*` trong Caddyfile.
+#
 # Cài đặt:
 #   sudo cp deploy/nextjs-base-realtime.service /etc/systemd/system/
 #   sudo systemctl daemon-reload

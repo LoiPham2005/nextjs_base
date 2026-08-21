@@ -10,6 +10,16 @@
 # ⚠️ Worker BẮT BUỘC có REDIS_URL trong /etc/nextjs-base/env. Khác web và
 # realtime, nó không có việc gì để làm nếu thiếu hàng đợi — và sẽ dừng ngay với
 # thông báo rõ ràng thay vì ngồi im trông như đang hoạt động.
+#
+# ⚠️ DỰ ÁN KHÔNG DÙNG HÀNG ĐỢI (`QUEUE_ENABLED=0`): tắt Ở TẦNG UNIT, đừng chỉ
+# sửa biến môi trường.
+#
+#   sudo systemctl disable --now nextjs-base-worker
+#
+# Đặt QUEUE_ENABLED=0 trong file env thì tiến trình tự thoát với mã 0 kèm lời
+# giải thích — nhưng `Restart=always` bật lại nó ngay lập tức. Nó sẽ quay vòng
+# cho tới khi chạm StartLimitBurst rồi vào trạng thái `failed`: ồn ào, và không
+# phải thứ bạn muốn thấy chỉ vì đã tắt một tính năng có chủ đích.
 
 [Unit]
 Description=nextjs-base worker (job nền)

@@ -22,6 +22,36 @@
  * chặn lại nếu làm ngược thứ tự.
  */
 
+/**
+ * Đọc cờ bật/tắt tiến trình phụ. Cùng biến, cùng quy ước `1`/`0` với
+ * `src/lib/feature-flag.ts` và `docker-compose.yml`.
+ *
+ * ⚠️ File cấu hình này được Node đánh giá TRƯỚC khi PM2 nạp `--env-file`, nên
+ * nó chỉ thấy biến của SHELL, không thấy `.env`. Muốn tắt thì nạp file env vào
+ * shell trước:
+ *
+ *   set -a && . ./.env && set +a && pnpm pm2:start
+ *
+ * Hoặc đơn giản hơn: `QUEUE_ENABLED=0 pnpm pm2:start`.
+ *
+ * (Đoạn kiểm tra PM2_INSTANCES bên dưới đã đọc `process.env.REDIS_URL` theo
+ * đúng cách này từ trước — không phải quy ước mới.)
+ */
+function isEnabled(name) {
+  const value = process.env[name];
+
+  if (value === undefined || value === "" || value === "1") return true;
+  if (value === "0") return false;
+
+  throw new Error(
+    `${name} chỉ nhận 1 (bật) hoặc 0 (tắt), nhận được "${value}". ` +
+      `docker-compose dùng chính biến này làm số replicas nên true/false không hợp lệ.`,
+  );
+}
+
+const realtimeEnabled = isEnabled("REALTIME_ENABLED");
+const queueEnabled = isEnabled("QUEUE_ENABLED");
+
 const instances = process.env.PM2_INSTANCES ?? "1";
 const wantsCluster = instances === "max" || Number(instances) > 1;
 const hasRedis = Boolean(process.env.REDIS_URL);
@@ -60,6 +90,13 @@ const shared = {
   time: true,
 };
 
+/*
+ * Lọc theo cờ thay vì để tiến trình tự thoát khi khởi động.
+ *
+ * PM2 `autorestart` bật lại tiến trình kể cả khi nó thoát với mã 0, nên một
+ * worker "tự tắt vì QUEUE_ENABLED=0" sẽ quay vòng mãi trong danh sách
+ * `pm2 list`. Không đưa nó vào ngay từ đầu mới là cách tắt đúng ở đây.
+ */
 module.exports = {
   apps: [
     {
@@ -78,7 +115,7 @@ module.exports = {
       // rate limit của proxy.
       env_production: { NODE_ENV: "production", PORT: 3000, HOSTNAME: "127.0.0.1" },
     },
-    {
+    realtimeEnabled && {
       ...shared,
       name: "nextjs-base-realtime",
       script: "realtime/dist/server.cjs",
@@ -92,7 +129,7 @@ module.exports = {
       env: { NODE_ENV: "development", REALTIME_PORT: 3002 },
       env_production: { NODE_ENV: "production", REALTIME_PORT: 3002 },
     },
-    {
+    queueEnabled && {
       ...shared,
       name: "nextjs-base-worker",
       script: "worker/dist/worker.cjs",
@@ -108,5 +145,5 @@ module.exports = {
       env: { NODE_ENV: "development" },
       env_production: { NODE_ENV: "production" },
     },
-  ],
+  ].filter(Boolean),
 };

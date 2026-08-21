@@ -135,9 +135,37 @@ không chọn sẵn nhà cung cấp cho bạn.
 | Kiểm quyền Server Action | `src/lib/define-action.ts`      | — (luôn bật)                               |
 | Cache                    | `src/lib/cache.ts`              | RAM tiến trình                             |
 | Job queue                | `src/lib/queue.ts` + `worker/`  | Dev: chạy ngay tại chỗ · Prod: **ném lỗi** |
+| Cờ bật/tắt tiến trình    | `src/lib/feature-flag.ts`       | Bật (`1`) — xem bảng ngay dưới bảng này    |
 | Nhật ký thao tác         | `src/services/audit.service.ts` | — (luôn ghi)                               |
 | Giám sát lỗi             | `src/lib/observability.ts`      | Không làm gì (log vẫn có)                  |
 | Lưu trữ file             | `src/lib/storage.ts`            | Dev: ghi đĩa · Prod: **ném lỗi**           |
+
+**Hai lớp trong số đó tắt được bằng biến môi trường** — dự án nào không cần thì
+bỏ hẳn tiến trình, không phải xoá code:
+
+| Biến               | `1` (mặc định)                  | `0`                                                      |
+| ------------------ | ------------------------------- | -------------------------------------------------------- |
+| `QUEUE_ENABLED`    | `enqueue()` → Redis → `worker/` | `enqueue()` chạy job NGAY trong request; không cần Redis |
+| `REALTIME_ENABLED` | Dựng tiến trình `realtime/`     | Không dựng                                               |
+
+- **Chỉ nhận `1`/`0`, KHÔNG nhận `true`/`false`** — `docker-compose.yml` dùng
+  chính hai biến này làm `deploy.replicas`, mà Compose chỉ hiểu số. Dùng chung
+  một biến cho app lẫn hạ tầng là có chủ đích: tách đôi thì sẽ có ngày app đẩy
+  job vào Redis trong khi không worker nào chạy — im lặng hoàn toàn. Định nghĩa
+  ở `src/lib/feature-flag.ts`, dùng lại trong cả ba schema env (app, worker,
+  realtime).
+- **Tắt hàng đợi không mất tính năng nào**, chỉ đổi chỗ chạy. Cái mất là **thử
+  lại tự động**: lỗi trong handler bung thẳng ra request thay vì lùi vài giây
+  rồi chạy lại.
+- **Cách tắt theo từng đường deploy**: Docker `docker compose up -d` (tự gỡ
+  container) · PM2 `ecosystem.config.cjs` lọc app ra khỏi danh sách, và
+  `deploy-pm2.sh` gọi `pm2 delete` cho app đã bị lọc · systemd phải
+  `systemctl disable --now` — biến môi trường chỉ làm tiến trình tự thoát, mà
+  `Restart=always` bật lại ngay.
+- **`/api/health` trả `features`** — `queue` có ba trạng thái: `redis` (chạy nền
+  thật), `inline` (cờ bật nhưng thiếu `REDIS_URL` — gần như luôn là nhầm), `off`
+  (đã tắt có chủ đích). Không có nó thì worker chết im lặng trông hệt như dự án
+  cố ý không dùng hàng đợi.
 
 Vài điểm dễ sai:
 
@@ -146,6 +174,8 @@ Vài điểm dễ sai:
   thủ công: quên một chỗ thì không có gì báo.
 - **Job queue: `enqueue()` ném lỗi trên production khi thiếu `REDIS_URL`.** Cố ý — job bị nuốt
   trong im lặng nghĩa là email không bao giờ gửi mà không ai biết. Mọi email đã đi qua hàng đợi.
+  Phân biệt rõ hai chuyện: thiếu `REDIS_URL` là **quên** (ném lỗi), `QUEUE_ENABLED=0` là **chọn**
+  (chạy thẳng, kể cả trên production, không cảnh báo).
 - **`worker/` là tiến trình thứ ba**, sau `web` và `realtime`. Cả ba đường deploy đã nối sẵn.
   Thiếu nó thì job nằm trong Redis mà không ai chạy.
 - **`logger.error()` tự đẩy sang `captureException`** — không cần rải `Sentry.captureException`

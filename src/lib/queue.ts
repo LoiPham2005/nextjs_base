@@ -33,6 +33,21 @@ import type { JobName, JobPayloads } from "@/jobs/types";
  * Vế cuối là phần quan trọng nhất. Im lặng bỏ qua job trên production nghĩa là
  * email không bao giờ gửi, báo cáo không bao giờ chạy — mà không có dòng log
  * nào nói rằng có việc đã bị nuốt. Thà hỏng ngay lúc deploy.
+ *
+ * ---
+ * DỰ ÁN KHÔNG CẦN HÀNG ĐỢI: `QUEUE_ENABLED=0`
+ *
+ * Không phải dự án nào cũng đáng dựng thêm Redis và một tiến trình thứ ba.
+ * Đặt `QUEUE_ENABLED=0` thì `enqueue()` chạy handler ngay trong request — kể
+ * cả trên production, và đó là hành vi ĐÚNG chứ không phải một sự cố: cấu hình
+ * nói rõ là không dùng hàng đợi, nên chạy thẳng không giấu giếm điều gì.
+ *
+ * Khác biệt duy nhất so với nhánh "thiếu Redis" ở trên là ai quyết định. Thiếu
+ * `REDIS_URL` là quên; `QUEUE_ENABLED=0` là chọn. Bộ khung chỉ ném lỗi với vế
+ * đầu.
+ *
+ * Cùng biến đó cũng tắt luôn container/tiến trình worker — xem `featureFlag()`
+ * trong `src/lib/env.ts` để hiểu vì sao chỉ có MỘT biến.
  */
 
 const QUEUE_NAME = "app";
@@ -88,7 +103,7 @@ export type EnqueueOptions = {
 /**
  * Đẩy một job vào hàng đợi.
  *
- * @throws Khi đang chạy production mà chưa cấu hình `REDIS_URL`.
+ * @throws Khi `QUEUE_ENABLED` đang bật, đang chạy production, mà thiếu `REDIS_URL`.
  *
  * @example
  * await enqueue("email:send", { to, subject, text });
@@ -98,12 +113,33 @@ export async function enqueue<TName extends JobName>(
   payload: JobPayloads[TName],
   options: EnqueueOptions = {},
 ): Promise<void> {
+  if (!env.QUEUE_ENABLED) {
+    /*
+     * Hàng đợi bị TẮT CÓ CHỦ ĐÍCH — khác hẳn nhánh "thiếu Redis" ngay bên dưới.
+     *
+     * Vì vậy ở đây không cảnh báo và cũng không ném lỗi trên production: đây là
+     * một lựa chọn cấu hình hợp lệ, không phải cấu hình bỏ sót. Job vẫn chạy
+     * đủ, chỉ là chạy ngay tại đây thay vì ở tiến trình khác.
+     *
+     * Lỗi trong handler được để BUNG RA nguyên vẹn. Nuốt nó đi thì tắt hàng đợi
+     * biến thành "job im lặng biến mất" — đúng thứ mà cả file này tồn tại để
+     * ngăn. Người gọi thấy lỗi và tự quyết định.
+     */
+    logger.debug(`QUEUE_ENABLED=0 — chạy job "${name}" ngay trong tiến trình này`);
+
+    await jobHandlers[name](payload);
+    return;
+  }
+
   if (!env.REDIS_URL) {
     if (isProduction) {
       throw new Error(
-        `Không đẩy được job "${name}": chưa cấu hình REDIS_URL. ` +
-          `Trên production, job bị bỏ qua trong im lặng là hành vi nguy hiểm — ` +
-          `đặt REDIS_URL và chạy tiến trình worker (xem worker/).`,
+        `Không đẩy được job "${name}": QUEUE_ENABLED đang bật nhưng thiếu REDIS_URL. ` +
+          `Trên production, job bị bỏ qua trong im lặng là hành vi nguy hiểm nên ` +
+          `phải chọn một trong hai đường, không có đường thứ ba:\n` +
+          `  • Đặt REDIS_URL rồi chạy tiến trình worker (xem worker/) — có thử lại tự động.\n` +
+          `  • Hoặc đặt QUEUE_ENABLED=0 để job chạy thẳng trong request — không cần Redis, ` +
+          `nhưng người dùng phải chờ và không có thử lại.`,
       );
     }
 
@@ -124,9 +160,16 @@ export async function enqueue<TName extends JobName>(
   logger.debug("Đã đẩy job vào hàng đợi", { name, jobId: options.jobId });
 }
 
-/** `true` khi job thật sự chạy nền. Dùng để hiển thị trạng thái, không phải để rẽ nhánh nghiệp vụ. */
+/**
+ * `true` khi job THẬT SỰ chạy nền — tức là cờ đang bật VÀ có Redis để đẩy vào.
+ *
+ * Cố ý không chỉ đọc `QUEUE_ENABLED`: bật cờ mà thiếu Redis thì job vẫn chạy
+ * đồng bộ (ở dev) chứ không chạy nền, nên trả `true` là nói sai.
+ *
+ * Dùng để hiển thị trạng thái, không phải để rẽ nhánh nghiệp vụ.
+ */
 export function isQueueEnabled(): boolean {
-  return Boolean(env.REDIS_URL);
+  return env.QUEUE_ENABLED && Boolean(env.REDIS_URL);
 }
 
 /** Đóng kết nối. Gọi khi script ngắn hạn kết thúc, nếu không tiến trình treo. */

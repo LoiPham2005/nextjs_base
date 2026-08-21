@@ -115,6 +115,52 @@ trình. Chạy **một** tiến trình thì không sao. Từ tiến trình thứ
 ngưỡng chống brute-force bị nhân lên theo số tiến trình — im lặng, không log.
 Chạy nhiều instance thì bắt buộc phải có Redis.
 
+### Tuỳ chọn — tắt bớt tiến trình không dùng
+
+Dự án dựng sẵn ba tiến trình: `web`, `realtime` (WebSocket), `worker` (job nền).
+Không phải dự án nào cũng cần đủ ba. Hai biến dưới đây tắt hẳn tiến trình tương
+ứng ở **cả ba cách deploy**:
+
+| Biến               | `1` (mặc định)                | `0`                                                      |
+| ------------------ | ----------------------------- | -------------------------------------------------------- |
+| `QUEUE_ENABLED`    | Job vào Redis, `worker` xử lý | `enqueue()` chạy job ngay trong request; không cần Redis |
+| `REALTIME_ENABLED` | Dựng tiến trình WebSocket     | Không dựng                                               |
+
+⚠️ **Chỉ nhận `1` hoặc `0`, không nhận `true`/`false`.** Chính hai biến này được
+`docker-compose.yml` dùng làm `deploy.replicas`, mà Compose chỉ hiểu số — đặt
+`false` là nó dừng ngay với `strconv.Atoi: parsing "false"`. Dùng chung một biến
+cho cả app lẫn hạ tầng là có chủ đích: tách đôi thì sẽ có ngày app đẩy job vào
+Redis trong khi không worker nào chạy, và chuyện đó xảy ra hoàn toàn trong im lặng.
+
+Tắt hàng đợi **không mất tính năng nào**, chỉ đổi chỗ chạy. Cái mất là thử lại
+tự động: đang bật, một lần SMTP nghẽn chỉ làm job lùi vài giây; tắt đi thì lỗi
+bung thẳng ra request và người dùng đăng ký hỏng. Dự án gửi mail thật nên để bật.
+
+Cách tắt theo từng đường deploy:
+
+```bash
+# Docker Compose — sửa .env rồi up lại. Container đang chạy sẽ bị GỠ, không bỏ mặc.
+QUEUE_ENABLED=0 REALTIME_ENABLED=0
+docker compose up -d
+
+# systemd — biến trong /etc/nextjs-base/env chỉ làm tiến trình tự thoát, mà
+# `Restart=always` thì bật lại ngay. Phải tắt ở tầng unit:
+sudo systemctl disable --now nextjs-base-worker
+sudo systemctl disable --now nextjs-base-realtime
+
+# PM2 — ecosystem.config.cjs đọc biến của SHELL (không đọc .env), nên nạp trước:
+set -a && . /etc/nextjs-base/env && set +a
+pnpm pm2:start
+```
+
+⚠️ Tắt realtime thì **bỏ luôn khối `/socket.io/*` trong Caddyfile**. Để lại thì
+proxy trả 502 (trông như dịch vụ hỏng) thay vì 404 (đúng: không có ở đây).
+
+Kiểm tra deploy đang bật những gì: `curl -s https://ten-mien/api/health` trả
+`"features":{"queue":"redis","realtime":"on"}`. Giá trị `queue` có ba trạng thái
+— `redis` (chạy nền thật), `inline` (cờ bật nhưng thiếu `REDIS_URL`, gần như
+luôn là nhầm), `off` (đã tắt có chủ đích).
+
 ---
 
 ## 3. Lấy mã nguồn

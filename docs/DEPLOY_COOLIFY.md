@@ -129,6 +129,28 @@ thông báo chỉ rõ **tên biến nào** — đọc log là biết, đừng đ
 `REDIS_URL` **không cần điền**: compose đã set sẵn `redis://redis:6379` cho cả
 `web` và `realtime`.
 
+### Tuỳ chọn — tắt bớt service không dùng
+
+| Biến               | `1` (mặc định)          | `0`                                                       |
+| ------------------ | ----------------------- | --------------------------------------------------------- |
+| `QUEUE_ENABLED`    | Dựng service `worker`   | Không dựng; job chạy thẳng trong request, không cần Redis |
+| `REALTIME_ENABLED` | Dựng service `realtime` | Không dựng                                                |
+
+Hai biến này được compose dùng làm `deploy.replicas` của service tương ứng, nên
+đặt `0` là **Coolify không dựng container đó** — và nếu nó đang chạy thì lần
+deploy sau sẽ gỡ đi.
+
+⚠️ **Chỉ nhận `1` hoặc `0`.** Điền `false` là deploy dừng ngay ở bước đọc
+compose với `strconv.Atoi: parsing "false": invalid syntax`. Cùng biến đó cũng
+là thứ app đọc để quyết định có đẩy job vào Redis hay không — một biến, nên
+không có chuyện hạ tầng và app hiểu khác nhau.
+
+⚠️ Tắt `realtime` thì bỏ luôn phần định tuyến WebSocket ở mục 5.2, nếu không
+Traefik trả 502 thay vì 404.
+
+Kiểm tra sau khi deploy: `curl -s https://<domain>/api/health` trả
+`"features":{"queue":"redis","realtime":"on"}`.
+
 ### Không cần đụng tới
 
 `PORT`, `HOSTNAME`, `NODE_ENV`, `REALTIME_PORT` — compose và Dockerfile đã set.

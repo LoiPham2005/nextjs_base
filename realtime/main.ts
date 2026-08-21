@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger";
+import { realtimeEnv } from "./env";
 import { startRealtime } from "./server";
 
 /**
@@ -8,6 +9,17 @@ import { startRealtime } from "./server";
  * import một file là nó tự chạy và không tắt được.
  */
 async function main() {
+  // Cùng lý do với `worker/main.ts`: cấu hình nói không dùng WebSocket mà tiến
+  // trình WebSocket vẫn được dựng là mâu thuẫn, và mâu thuẫn thì phải nhìn thấy
+  // được. Đường tắt đúng là không dựng nó — xem `REALTIME_ENABLED`.
+  if (!realtimeEnv.REALTIME_ENABLED) {
+    logger.warn(
+      "REALTIME_ENABLED=0 — WebSocket đã tắt nên tiến trình này không cần chạy. Thoát.\n" +
+        "Nhớ bỏ luôn khối `/socket.io/*` trong Caddyfile, không thì proxy trả 502 thay vì 404.",
+    );
+    process.exit(0);
+  }
+
   const realtime = await startRealtime();
 
   const shutdown = () => {

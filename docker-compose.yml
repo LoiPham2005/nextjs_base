@@ -114,6 +114,11 @@ services:
       # Rate limit dùng chung giữa các instance. Cùng một Redis với realtime —
       # khoá của rate limit mang tiền tố riêng nên hai bên không giẫm lên nhau.
       REDIS_URL: redis://redis:6379
+      # Truyền tường minh thay vì chỉ trông vào `env_file` (`required: false`,
+      # nên vắng mặt cũng không ai báo). Nền tảng như Coolify truyền biến qua
+      # môi trường chứ không chắc có tạo file `.env` cạnh compose.
+      QUEUE_ENABLED: ${QUEUE_ENABLED:-1}
+      REALTIME_ENABLED: ${REALTIME_ENABLED:-1}
     # Chỉ nghe loopback: reverse proxy (Caddy/Traefik/Coolify) là cửa duy nhất
     # đi vào. Mở ra 0.0.0.0 thì client gọi thẳng cổng 3000, bỏ qua TLS — và
     # nguy hiểm hơn: bỏ qua luôn bước proxy GHI ĐÈ X-Forwarded-For, nên ai cũng
@@ -157,12 +162,29 @@ services:
       timeout: 3s
       retries: 10
 
+  # Tắt hẳn service này bằng `REALTIME_ENABLED=0` trong .env — xem khối
+  # `deploy.replicas` bên dưới.
   realtime:
     build:
       context: .
       target: realtime
     container_name: nextjs_prisma_realtime
     restart: unless-stopped
+
+    # CÔNG TẮC BẬT/TẮT.
+    #
+    # `replicas: 0` là không dựng container — và nếu nó đang chạy thì
+    # `docker compose up -d` DỪNG VÀ GỠ nó đi, chứ không bỏ mặc đó.
+    #
+    # Vì sao không dùng `profiles:` — cách quen thuộc hơn: service có profile
+    # thì mặc định KHÔNG chạy, nên ai không biết mà quên đặt `COMPOSE_PROFILES`
+    # sẽ mất realtime lẫn worker trong im lặng. Ở đây mặc định là 1: không đụng
+    # gì thì mọi thứ vẫn chạy như trước, muốn tắt mới phải nói ra.
+    #
+    # ⚠️ Chỉ nhận SỐ. `REALTIME_ENABLED=false` làm compose dừng ngay với
+    # `strconv.Atoi: parsing "false"` — cố ý ồn ào, xem src/lib/feature-flag.ts.
+    deploy:
+      replicas: ${REALTIME_ENABLED:-1}
     env_file:
       - path: .env
         required: false
@@ -171,6 +193,7 @@ services:
       REALTIME_PORT: 3002
       REDIS_URL: redis://redis:6379
       REALTIME_CORS_ORIGIN: ${REALTIME_CORS_ORIGIN:-http://localhost:3000}
+      REALTIME_ENABLED: ${REALTIME_ENABLED:-1}
       # Phải TRÙNG KHỚP với app chính: token do web/mobile cấp được verify ở đây.
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET là bắt buộc}
     # Cùng lý do với `web`: proxy định tuyến /socket.io/* vào đây, không ai
@@ -203,6 +226,15 @@ services:
       target: worker
     container_name: nextjs_prisma_worker
     restart: unless-stopped
+
+    # CÔNG TẮC BẬT/TẮT — cùng cơ chế với `realtime` ở trên.
+    #
+    # Dùng ĐÚNG biến mà app đọc để quyết định có đẩy job vào Redis hay không.
+    # Đây là điểm quan trọng nhất: nếu compose có biến riêng, sẽ có ngày
+    # `QUEUE_ENABLED=1` mà worker bị tắt — job chất đống trong Redis, email
+    # không bao giờ gửi, và không có một dòng log nào báo.
+    deploy:
+      replicas: ${QUEUE_ENABLED:-1}
     env_file:
       - path: .env
         required: false
@@ -213,6 +245,7 @@ services:
       # nếu thiếu hàng đợi. `:?` khiến compose dừng ngay thay vì dựng một tiến
       # trình ngồi im trông như đang hoạt động.
       REDIS_URL: redis://redis:6379
+      QUEUE_ENABLED: ${QUEUE_ENABLED:-1}
     depends_on:
       postgres:
         condition: service_healthy

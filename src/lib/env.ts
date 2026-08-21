@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { featureFlag } from "./feature-flag";
 
 /**
  * Validate biến môi trường một lần, ngay lúc module được load.
@@ -101,6 +102,38 @@ const envSchema = z.object({
    */
   LOGIN_MAX_FAILED_ATTEMPTS: z.coerce.number().int().positive().max(20).default(5),
   LOGIN_LOCKOUT_MINUTES: z.coerce.number().int().positive().max(1440).default(15),
+
+  // --- Bật/tắt tiến trình phụ ---------------------------------------------
+
+  /**
+   * Hàng đợi job nền (BullMQ + `worker/`).
+   *
+   * `0` = không dùng hàng đợi: `enqueue()` chạy handler NGAY trong request
+   * đang xử lý. Việc vẫn xong đủ, không tính năng nào biến mất — chỉ đổi CHỖ
+   * chạy. Đổi lại thì không cần Redis, không cần dựng tiến trình worker.
+   *
+   * ⚠️ Cái mất khi tắt: **thử lại tự động**. Đang bật hàng đợi, một lần SMTP
+   * nghẽn chỉ làm job lùi lại vài giây rồi chạy lại. Tắt đi thì lỗi đó bung
+   * thẳng ra request — người dùng đăng ký hỏng vì máy chủ mail hắt hơi.
+   * Dự án gửi mail thật thì nên để bật.
+   */
+  QUEUE_ENABLED: featureFlag(true),
+
+  /**
+   * Máy chủ WebSocket (`realtime/`).
+   *
+   * App Next.js KHÔNG tự gọi sang realtime, nên biến này không đổi hành vi của
+   * request nào. Nó tồn tại vì hai việc:
+   *
+   *   1. `docker-compose.yml` và `ecosystem.config.cjs` đọc nó để quyết định
+   *      có dựng tiến trình đó không.
+   *   2. `/api/health` báo ra deploy này ĐÁNG LẼ có realtime hay không — thứ
+   *      duy nhất phân biệt được "chưa bật bao giờ" với "đã bật mà chết".
+   *
+   * ⚠️ Tắt realtime thì bỏ luôn khối `/socket.io/*` trong Caddyfile. Để lại
+   * thì proxy trả 502 (trông như hỏng) thay vì 404 (đúng: không có ở đây).
+   */
+  REALTIME_ENABLED: featureFlag(true),
 
   // --- OAuth / đăng nhập mạng xã hội --------------------------------------
   // Mỗi provider độc lập — thiếu cặp CLIENT_ID/SECRET của provider nào thì
