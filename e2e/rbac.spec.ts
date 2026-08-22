@@ -22,21 +22,18 @@ test.describe("Phân quyền", () => {
   test("USER thường vào /users nhận 404, KHÔNG phải 403", async ({ page }) => {
     await login(page, "user1@example.com");
 
-    await page.goto("/users");
+    const response = await page.goto("/users");
 
-    // 404 có chủ đích: không cho user thường thấy nội dung quản lý người dùng
-    await expect(page.getByText("Không tìm thấy trang")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Quản lý người dùng" })).toHaveCount(0);
+    // 404 có chủ đích: 403 xác nhận cho người hỏi biết tài nguyên đó tồn tại.
+    expect(response?.status()).toBe(404);
   });
 
   test("USER thường không thấy trang vai trò", async ({ page }) => {
     await login(page, "user1@example.com");
 
-    await page.goto("/roles");
+    const response = await page.goto("/roles");
 
-    // 404 có chủ đích: không cho user thường thấy trang quản lý vai trò
-    await expect(page.getByText("Không tìm thấy trang")).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Vai trò/ })).toHaveCount(0);
+    expect(response?.status()).toBe(404);
   });
 
   test("ADMIN mở được trang vai trò và thấy đủ ô tick quyền", async ({ page }) => {
