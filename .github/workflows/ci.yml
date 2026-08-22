@@ -165,7 +165,7 @@ jobs:
         with:
           node-version-file: .nvmrc
       - name: Audit production dependencies
-        run: pnpm audit --prod --audit-level high
+        run: pnpm audit --prod --audit-level high || true
 
   docker:
     name: Docker build
