@@ -177,7 +177,7 @@ jobs:
 
       # Dockerfile hỏng chỉ lộ ra lúc deploy nếu CI không tự build thử.
       # `load: true` để bước sau chạy được image vừa build.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           target: runner
