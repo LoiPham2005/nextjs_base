@@ -8,10 +8,10 @@ datasource db {
 
 model Role {
   id          String  @id @default(cuid())
-  key         String  @unique // Định danh cố định (VD: ADMIN)
-  name        String // Tên hiển thị
+  key         String  @unique // Mã vai trò cố định (VD: ADMIN, USER)
+  name        String  // Tên hiển thị
   description String?
-  isSystem    Boolean @default(false) // Không thể xóa/đổi key nếu là true
+  isSystem    Boolean @default(false) // Vai trò hệ thống (không được xóa)
 
   permissions RolePermission[]
   users       User[]
@@ -24,7 +24,7 @@ model Role {
 
 model Permission {
   id          String  @id @default(cuid())
-  key         String  @unique // Khớp với hằng trong PERMISSIONS (VD: user:read)
+  key         String  @unique // Mã quyền hạn (VD: user:read, user:create)
   description String?
 
   roles RolePermission[]
@@ -51,22 +51,22 @@ model RolePermission {
 enum UserStatus {
   ACTIVE    // Đang hoạt động
   INACTIVE  // Chưa kích hoạt / Tạm ngưng
-  BANNED    // Bị khóa vĩnh viễn do vi phạm
+  BANNED    // Bị khóa do vi phạm
 }
 
 model User {
   id                  String     @id @default(cuid())
   email               String     @unique
-  password            String? // Bcrypt hash (null nếu đăng nhập OAuth/chưa đặt)
-  username            String?    @unique // Lưu dạng lowercase
-  fullName            String? // Tên hiển thị đầy đủ
+  password            String?    // Bcrypt hash (null nếu đăng nhập qua OAuth)
+  username            String?    @unique
+  fullName            String?
   roleId              String
   role                Role       @relation(fields: [roleId], references: [id])
-  emailVerifiedAt     DateTime? // Thời điểm xác thực email
-  status              UserStatus @default(ACTIVE) // Khoá tài khoản do admin (BANNED) — thủ công, không tự hết hạn
-  failedLoginAttempts Int        @default(0) // Reset về 0 khi đăng nhập đúng
-  lockedUntil         DateTime? // Khoá tạm do sai mật khẩu liên tiếp — tự hết hạn, khác với status
-  deletedAt           DateTime? // Xoá mềm. null = còn hoạt động
+  emailVerifiedAt     DateTime?  // Thời điểm xác thực email
+  status              UserStatus @default(ACTIVE)
+  failedLoginAttempts Int        @default(0) // Số lần đăng nhập sai liên tiếp
+  lockedUntil         DateTime?  // Thời điểm hết hạn khóa tạm do sai pass
+  deletedAt           DateTime?  // Xóa mềm (null = còn hoạt động)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -81,19 +81,12 @@ model User {
   @@map("users")
 }
 
-/**
- * Tài khoản mạng xã hội liên kết (Google/Github/Facebook/Apple).
- * Cố ý KHÔNG lưu access/refresh token của provider: bảng này chỉ phục vụ đăng
- * nhập (xác định "đây là user nào"), không gọi lại API của Google/Github thay
- * mặt người dùng sau đó. Lưu token mà không dùng là giữ một bí mật không cần
- * thiết — nếu sau này cần gọi API thay mặt user thì thêm cột lúc đó.
- */
 model Account {
   id                String   @id @default(cuid())
   userId            String
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider          String // "google" | "github" | "facebook" | "apple"
-  providerAccountId String // id người dùng phía provider (sub/id)
+  provider          String   // Google | Github | Facebook | Apple
+  providerAccountId String   // ID người dùng từ bên OAuth cung cấp
   createdAt         DateTime @default(now())
 
   @@unique([provider, providerAccountId])
@@ -103,12 +96,12 @@ model Account {
 
 model RefreshToken {
   id        String    @id @default(cuid())
-  tokenHash String    @unique // SHA-256 hash của token
+  tokenHash String    @unique // SHA-256 hash của refresh token
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
-  revokedAt DateTime? // Set khi đăng xuất hoặc xoay vòng token
-  userAgent String? // Thiết bị / Trình duyệt
+  revokedAt DateTime? // Thu hồi khi đăng xuất hoặc xoay vòng token
+  userAgent String?
   createdAt DateTime  @default(now())
 
   @@index([userId])
@@ -123,12 +116,12 @@ enum VerificationTokenType {
 
 model VerificationToken {
   id        String                @id @default(cuid())
-  tokenHash String                @unique // SHA-256 hash của token
+  tokenHash String                @unique // SHA-256 hash của mã OTP / Token xác thực
   type      VerificationTokenType
   userId    String
   user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
-  usedAt    DateTime? // Set khi token đã được sử dụng
+  usedAt    DateTime?             // Đánh dấu khi token đã được sử dụng
   createdAt DateTime              @default(now())
 
   @@index([userId, type])
@@ -136,51 +129,20 @@ model VerificationToken {
   @@map("verification_tokens")
 }
 
-/// Nhật ký thao tác — ai đổi gì, lúc nào.
-///
-/// Vì sao dự án này CẦN nó hơn phần lớn dự án khác: phân quyền sửa được lúc
-/// chạy. Một người có `role:update` tự cấp thêm quyền cho vai trò của mình là
-/// leo thang đặc quyền hợp lệ về mặt kỹ thuật — không có bảng này thì không
-/// cách nào biết chuyện đó đã xảy ra, cũng không biết lúc nào.
-///
-/// ---
-/// VÌ SAO KHÔNG DÙNG KHOÁ NGOẠI TỚI `users`
-///
-/// Nhật ký phải SỐNG LÂU HƠN đối tượng nó ghi lại. Xoá một người dùng mà bản
-/// ghi "người này đã xoá 40 tài khoản" biến mất theo thì nhật ký vô dụng đúng
-/// vào lúc cần nhất. Vì vậy `actorId` chỉ là chuỗi, không ràng buộc khoá ngoại,
-/// và `actorEmail` được chép lại tại thời điểm ghi để còn đọc được sau này.
 model AuditLog {
-  id String @id @default(cuid())
+  id         String   @id @default(cuid())
+  actorId    String?  // ID người thực hiện (null nếu do hệ thống)
+  actorEmail String?  // Email người thực hiện
+  action     String   // Hành động (VD: user.created, role.updated)
+  entity     String   // Thực thể bị tác động (user, role,...)
+  entityId   String?  // ID thực thể bị tác động
+  metadata   Json?    // Chi tiết dữ liệu thay đổi
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
 
-  /// Ai thực hiện. Null = tiến trình hệ thống (seed, cron, worker).
-  actorId    String?
-  /// Chép lại tại thời điểm ghi — người dùng có thể bị xoá hoặc đổi email sau đó.
-  actorEmail String?
-
-  /// Việc gì, theo quy ước `<tài-nguyên>.<hành-động>`, ví dụ `role.permissions_updated`.
-  action String
-
-  /// Loại đối tượng bị tác động, ví dụ `role`, `user`.
-  entity   String
-  /// Định danh đối tượng. Chuỗi tự do vì mỗi loại một kiểu khoá.
-  entityId String?
-
-  /// Chi tiết thay đổi. Chỉ chứa thứ ĐỦ để hiểu chuyện gì đã xảy ra —
-  /// KHÔNG BAO GIỜ chứa mật khẩu, token hay dữ liệu cá nhân nhạy cảm.
-  metadata Json?
-
-  /// Địa chỉ IP và trình duyệt, để lần theo khi điều tra sự cố.
-  ip        String?
-  userAgent String?
-
-  createdAt DateTime @default(now())
-
-  /// Câu hỏi hay gặp nhất: "gần đây có ai làm gì không" → sắp xếp theo thời gian.
   @@index([createdAt])
-  /// "người này đã làm những gì"
   @@index([actorId, createdAt])
-  /// "vai trò ADMIN đã bị ai sửa"
   @@index([entity, entityId, createdAt])
   @@map("audit_logs")
 }
