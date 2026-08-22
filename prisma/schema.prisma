@@ -49,8 +49,9 @@ model RolePermission {
 }
 
 enum UserStatus {
-  ACTIVE
-  BANNED
+  ACTIVE    // Đang hoạt động
+  INACTIVE  // Chưa kích hoạt / Tạm ngưng
+  BANNED    // Bị khóa vĩnh viễn do vi phạm
 }
 
 model User {
