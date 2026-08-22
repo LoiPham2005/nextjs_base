@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { permissionService } from "@/services/permission.service";
 
@@ -33,6 +34,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     permissionService.can(user.role, "user:read"),
     permissionService.can(user.role, "role:read"),
   ]);
+
+  if (!canSeeUsers && !canSeeRoles) {
+    notFound();
+  }
 
   const items = [
     { href: "/users", label: "Người dùng", visible: canSeeUsers },
