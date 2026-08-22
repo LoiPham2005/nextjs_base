@@ -1,3 +1,4 @@
+import "@/lib/openapi/zod-openapi";
 import { z } from "zod";
 import { fullNameSchema, passwordSchema, usernameSchema } from "./auth.schema";
 

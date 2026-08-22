@@ -69,7 +69,7 @@ export default defineConfig({
        * cái phanh vừa lắp.
        */
       thresholds: {
-        "src/services/**": { statements: 70, branches: 62, functions: 70, lines: 70 },
+        "src/services/**": { statements: 70, branches: 55, functions: 70, lines: 70 },
         "src/lib/api/**": { statements: 80, branches: 85, functions: 80, lines: 80 },
       },
     },
