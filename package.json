@@ -42,6 +42,7 @@
     "db:seed:prod": "SEED_TYPE=prod tsx prisma/seed.ts",
     "db:seed:dev": "SEED_TYPE=dev tsx prisma/seed.ts",
     "db:purge": "tsx --tsconfig tsconfig.scripts.json scripts/purge-expired.ts",
+    "gen:flutter": "tsx scripts/generate-flutter-client.ts",
     "postinstall": "prisma generate",
     "prepare": "husky || true"
   },

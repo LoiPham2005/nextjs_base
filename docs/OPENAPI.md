@@ -42,292 +42,143 @@ Khi ứng dụng đang chạy (`pnpm dev` hoặc `make dev`):
 
 ---
 
-## 3. Hướng dẫn chi tiết: Tự động sinh mã nguồn (Code Gen) cho Flutter / Dart
+## 3. Tự động sinh mã nguồn (Code Gen) cho Flutter
 
-Bạn không cần phải viết tay các file Model (`User`, `LoginResponse`...) hay API Services trong Flutter. Hãy để công cụ tự động sinh từ file `openapi.json`.
+Dự án hỗ trợ **2 phong cách sinh mã nguồn Client** tùy theo nhu cầu kiến trúc:
 
-### Bước 1: Mở Terminal tại thư mục dự án Flutter của bạn
-
-Đảm bảo bạn đang đứng ở thư mục gốc của dự án Flutter (nơi có file `pubspec.yaml`).
-
-#### ⚠️ Đặt code sinh ra ở `packages/`, KHÔNG phải trong `lib/`
-
-Với `--additional-properties=pubName=api_client`, generator **không sinh ra vài
-file lẻ** — nó sinh ra một **package Dart hoàn chỉnh**, có `pubspec.yaml`,
-`analysis_options.yaml`, `.gitignore` và `test/` riêng.
-
-Một package có `pubspec.yaml` riêng nằm bên trong `lib/` là sai về cấu trúc, và
-hỏng theo cách rất cụ thể: `flutter pub get` **không** cài dependency khai báo
-trong pubspec lồng nhau. Package sinh ra cần `built_value`, `built_collection`,
-`one_of` — muốn code trong `lib/` chạy được, bạn buộc phải thêm cả ba vào
-pubspec của ỨNG DỤNG, tức là trộn thẳng một bộ thư viện của thư viện con vào
-danh sách dependency của app.
-
-Cách đúng — để nó là một package thật, khai báo bằng path dependency:
-
-```
-your_flutter_app/
-├── lib/              ← code của bạn
-├── packages/
-│   └── api_client/   ← code sinh ra, KHÔNG sửa tay
-└── pubspec.yaml
-```
-
-```yaml
-# pubspec.yaml của app
-dependencies:
-  api_client:
-    path: packages/api_client
-```
-
-Lợi ích kèm theo: dependency riêng của client (`built_value`, `one_of`) nằm gọn
-trong package con, không lẫn vào app; và sinh lại code chỉ cần xoá đúng một thư
-mục, không sợ xoá nhầm code tay.
-
-### Bước 2: Chạy lệnh sinh Code (Dùng `openapi-generator-cli`)
-
-#### ⚠️ Điều kiện tiên quyết: máy phải có Java 11 trở lên
-
-`@openapitools/openapi-generator-cli` **không phải** công cụ Node. Nó chỉ là lớp
-vỏ mỏng bọc quanh một file JAR viết bằng Java — gói npm chỉ lo tải JAR về rồi
-gọi `java -jar`. Thiếu Java thì lệnh chết ngay, và thông báo lỗi thường không
-nói thẳng ra điều đó.
-
-Kiểm tra trước:
-
-**Trên Windows (CMD / PowerShell / Dùng `pnpm dlx`):**
-
-```cmd
-pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart-dio -o ./lib/core/api_client --additional-properties=pubName=api_client
-```
-
-**Trên Linux / macOS (Dùng `npx` hoặc `pnpm dlx`):**
-
-```bash
-java -version
-```
-
-Chưa có thì cài:
-
-| Hệ điều hành | Lệnh cài                                   |
-| ------------ | ------------------------------------------ |
-| macOS        | `brew install openjdk@21`                  |
-| Windows      | `winget install Microsoft.OpenJDK.21`      |
-| Ubuntu       | `sudo apt install openjdk-21-jre-headless` |
-
-#### Cách chắc chắn nhất: viết lệnh trên MỘT dòng
-
-Cách này chạy được ở **mọi** shell — macOS, Linux, PowerShell, CMD — vì nó
-không dùng ký tự nối dòng nào cả. Nếu bạn chỉ muốn lệnh chạy được và không
-quan tâm nó dài, dùng cách này:
-
-**Dùng `Dio`** (khuyên dùng cho Flutter):
-
-```bash
-pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart-dio -o ./packages/api_client --additional-properties=pubName=api_client
-```
-
-**Dùng `http` chuẩn của Dart:**
-
-```bash
-pnpm dlx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart -o ./packages/api_client
-```
-
-#### Muốn xuống dòng cho dễ đọc: ký tự nối dòng KHÁC nhau theo shell
-
-Đây là nguyên nhân phổ biến nhất khiến lệnh copy từ tài liệu Linux dán vào
-Windows thì hỏng. Dấu `\` chỉ có ý nghĩa nối dòng trong bash/zsh; PowerShell và
-CMD dùng ký tự khác, nên khi dán vào chúng, lệnh bị vỡ thành nhiều mảnh rời rạc
-và shell báo lỗi ở chỗ trông chẳng liên quan gì.
-
-| Shell                                   | Ký tự nối dòng     |
-| --------------------------------------- | ------------------ |
-| bash / zsh (macOS, Linux, **Git Bash**) | `\`                |
-| PowerShell                              | `` ` `` (backtick) |
-| CMD (`cmd.exe`)                         | `^`                |
-
-**macOS / Linux / Git Bash:**
-
-```bash
-pnpm dlx @openapitools/openapi-generator-cli generate \
-  -i http://localhost:3000/api/v1/openapi.json \
-  -g dart-dio \
-  -o ./packages/api_client \
-  --additional-properties=pubName=api_client
-```
-
-**Windows PowerShell:**
-
-```powershell
-pnpm dlx @openapitools/openapi-generator-cli generate `
-  -i http://localhost:3000/api/v1/openapi.json `
-  -g dart-dio `
-  -o ./packages/api_client `
-  --additional-properties=pubName=api_client
-```
-
-⚠️ Backtick phải là ký tự **cuối cùng** của dòng. Thừa một dấu cách phía sau nó
-là PowerShell không hiểu là nối dòng nữa — lỗi này rất khó nhìn ra bằng mắt.
-
-**Windows CMD:**
-
-```bat
-pnpm dlx @openapitools/openapi-generator-cli generate ^
-  -i http://localhost:3000/api/v1/openapi.json ^
-  -g dart-dio ^
-  -o ./packages/api_client ^
-  --additional-properties=pubName=api_client
-```
-
-#### `npx` hay `pnpm dlx`?
-
-Hai lệnh này làm cùng một việc: tải một gói về chạy tạm rồi bỏ. Tài liệu này
-dùng `pnpm dlx` vì dự án đã khoá trình quản lý gói bằng trường `packageManager`
-trong `package.json` — dùng nhất quán một công cụ thì bớt một thứ phải nghĩ.
-
-Nếu `npx` báo lỗi trên Windows (đã gặp thật), đổi sang `pnpm dlx` là cách khắc
-phục nhanh nhất. Ngược lại nếu máy chưa có pnpm thì `npx` vẫn dùng được:
-
-```bash
-npx @openapitools/openapi-generator-cli generate -i http://localhost:3000/api/v1/openapi.json -g dart-dio -o ./packages/api_client --additional-properties=pubName=api_client
-```
-
-#### ⚠️ `localhost` khi chạy trên máy ảo Android hoặc thiết bị thật
-
-Lệnh sinh code ở trên chạy trên MÁY TÍNH nên `localhost` là đúng. Nhưng URL bạn
-điền vào `BaseOptions(baseUrl: ...)` trong Flutter thì khác:
-
-| Chạy ở đâu      | Địa chỉ tới máy tính của bạn   |
-| --------------- | ------------------------------ |
-| Máy ảo Android  | `http://10.0.2.2:3000`         |
-| Máy ảo iOS      | `http://localhost:3000`        |
-| Điện thoại thật | `http://<IP-LAN-của-máy>:3000` |
-
-Với điện thoại thật, `pnpm dev` phải lắng nghe trên mọi địa chỉ:
-`pnpm dev -- -H 0.0.0.0`.
+| Tiêu chí                 | Cách 1: Retrofit + Freezed (Khuyên dùng)                  | Cách 2: OpenAPI Generator CLI (`dart-dio`)     |
+| :----------------------- | :-------------------------------------------------------- | :--------------------------------------------- |
+| **Công cụ**              | `openapi_retrofit_generator`                              | `@openapitools/openapi-generator-cli`          |
+| **Yêu cầu Java**         | ❌ **Không cần Java** (Chạy bằng Dart/Node thuần)         | ⚠️ **Bắt buộc Java 11+**                       |
+| **Model**                | `@Freezed` + `json_serializable` (Khớp 100% Flutter Base) | `built_value` + `built_collection` + `one_of`  |
+| **HTTP Client**          | `Retrofit` (`@RestApi`)                                   | Tự chế (`ApiClient` + `Dio`)                   |
+| **Tích hợp DI/Riverpod** | Cực kỳ mượt mà (`ref.read(authApiProvider)`)              | Cần adapter chuyển đổi `BuiltList` sang `List` |
+| **Cách chạy**            | 1 Lệnh tự động hoàn toàn                                  | Chạy lệnh CLI + `pub get` + `build_runner`     |
 
 ---
 
-### ⚠️ Trước khi dùng: dart-dio ép bạn dùng `built_value`, không phải `freezed`
+### 👉 CÁCH 1: Dùng Retrofit + Freezed + json_serializable (Khuyên Dùng Cho Dự Án Này)
 
-Đây **không phải lựa chọn**. Generator `dart-dio` sinh model theo `built_value`,
-chấm hết — `pubspec.yaml` của package sinh ra phụ thuộc `built_value` +
-`built_collection`, và mọi model đều mang `@BuiltValue()`.
+Đây là cách tương thích hoàn hảo 100% với kiến trúc `flutter_base2` (Freezed, Retrofit, Riverpod).
 
-Nghĩa là nếu dự án Flutter của bạn đã dùng `freezed` + `json_serializable` (như
-`flutter_base2`), thêm client này vào là có **hai hệ sinh model song song**
-trong cùng một app: hai bộ annotation, hai generator, hai lần `build_runner`
-chạy lâu hơn.
+#### 1. Chạy 1-Click:
 
-Cân nhắc trước khi quyết định:
+- **Đứng từ Backend (`nextjs_prisma_base`):**
+  ```bash
+  pnpm gen:flutter
+  ```
+- **Hoặc đứng từ Flutter (`flutter_base_v2`):**
+  ```bash
+  make gen-api
+  # hoặc trên PowerShell Windows:
+  fvm dart run tools/gen_api.dart
+  ```
 
-|                                         | Sinh tự động (`dart-dio`)        | Viết tay (`retrofit` + `freezed`) |
-| --------------------------------------- | -------------------------------- | --------------------------------- |
-| Công sức ban đầu                        | Gần bằng 0                       | Mỗi endpoint vài phút             |
-| Đồng bộ với backend                     | Sinh lại là xong                 | Phải tự nhớ sửa                   |
-| Hệ serialization                        | `built_value` (thêm mới)         | `freezed` (đã có)                 |
-| Tên class                               | Máy đặt, thường xấu              | Bạn đặt                           |
-| Đi qua interceptor sẵn có               | Được, nếu truyền Dio của bạn vào | Mặc định đã đi                    |
-| Chỉ dùng 5–10 endpoint                  | Thừa                             | Hợp lý                            |
-| Dùng 50+ endpoint, backend đổi liên tục | Rất đáng                         | Mệt                               |
-
-**Gợi ý:** dự án đã có `retrofit` + `freezed` và chỉ gọi vài chục endpoint thì
-viết tay theo mẫu sẵn có gọn hơn. Chọn sinh tự động khi số endpoint lớn, hoặc
-khi backend thay đổi thường xuyên tới mức việc tự nhớ đồng bộ là gánh nặng thật.
-
-Dù chọn cách nào, `/docs` và `openapi.json` vẫn có giá trị: nó là hợp đồng API
-luôn khớp code, dùng để tra cứu và để kiểm chứng model viết tay.
-
-### 💡 Tên class sinh ra xấu? Sửa ở BACKEND, không phải ở Flutter
-
-Nếu sinh code mà nhận được những cái tên như `AuthLoginPostRequest`,
-`AuthMeGet200ResponseUser`, `RolesKeyPatchRequest` — đó **không phải lỗi của
-generator**. Nó đang tự bịa tên vì đặc tả OpenAPI mô tả schema đó **inline**,
-không đặt tên.
-
-So sánh trong chính dự án này:
-
-| Tên sinh ra             | Vì sao                                             |
-| ----------------------- | -------------------------------------------------- |
-| `ApiError`, `TokenPair` | Backend có gọi `registry.register("TokenPair", …)` |
-| `AuthLoginPostRequest`  | Schema viết inline, không đăng ký tên              |
-
-Cách sửa nằm ở `src/lib/openapi/registry.ts` — đăng ký tên cho schema:
-
-```ts
-const loginRequestSchema = registry.register("LoginRequest", loginSchema);
-
-registry.registerPath({
-  method: "post",
-  path: "/auth/login",
-  request: { body: { content: { "application/json": { schema: loginRequestSchema } } } },
-  // …
-});
-```
-
-Sinh lại là có `LoginRequest` thay vì `AuthLoginPostRequest`. Sửa một lần ở
-backend, mọi client (Dart, TypeScript, Kotlin…) đều hưởng.
-
-### Bước 3: Cài đặt Dependencies trong `pubspec.yaml` (nếu cần)
-
-Nếu dùng `dart-dio`, thêm các package sau vào `pubspec.yaml` của Flutter:
+#### 2. Cấu hình tự động (`packages/api_client/openapi_generator.yaml`):
 
 ```yaml
-dependencies:
-  dio: ^5.7.0
-  built_value: ^8.9.2
-  built_collection: ^5.1.1
-
-dev_dependencies:
-  build_runner: ^2.4.13
-  built_value_generator: ^8.9.2
+openapi_generator:
+  schema_url: http://localhost:3000/api/v1/openapi.json
+  output_directory: lib/src
+  json_serializer: freezed
 ```
 
-Sau đó chạy:
+#### 3. Quy trình tự động diễn ra:
 
-```bash
-flutter pub get
-dart run build_runner build --delete-conflicting-outputs
-```
+1. Tải OpenAPI Spec từ `http://localhost:3000/api/v1/openapi.json`.
+2. Sinh Models `@Freezed` và Service Retrofit `@RestApi`.
+3. Tự động tạo file `lib/api_client.dart` export tất cả class.
+4. Tự động chạy `build_runner` sinh `.freezed.dart` và `.g.dart`.
+5. Tự động cập nhật Riverpod Providers (`api_client_provider.g.dart`).
 
----
-
-### Bước 4: Sử dụng trong Code Flutter
-
-Sau khi sinh code, bạn có thể gọi API dễ dàng và có Type Safety 100%:
+#### 4. Cách gọi trong Flutter:
 
 ```dart
-import 'package:your_app/core/api_client/lib/api.dart';
-import 'package:dio/dio.dart';
+import 'package:api_client/api_client.dart';
+import 'package:flutter_base2/core/base/di/api_client_provider.dart';
+
+@riverpod
+class LoginNotifier extends _$LoginNotifier {
+  Future<void> submit(String identifier, String password) async {
+    final authApi = ref.read(authApiProvider);
+    final res = await authApi.postAuthLogin(
+      body: LoginRequest(identifier: identifier, password: password),
+    );
+    print('Access Token: ${res.data?.accessToken}');
+  }
+}
+```
+
+---
+
+### 👉 CÁCH 2: Dùng OpenAPI Generator CLI (`built_value` + `built_collection` + `one_of`)
+
+Nếu bạn muốn dùng công cụ chính thức của tổ chức OpenAPI Tools ([openapi-generator](https://github.com/OpenAPITools/openapi-generator)):
+
+#### 1. Yêu cầu môi trường:
+
+- Máy tính phải cài đặt sẵn **Java Runtime Environment (JRE / JDK 11+)** (kiểm tra bằng `java -version`).
+- `pnpm` hoặc `npx`.
+
+#### 2. Lệnh sinh mã nguồn:
+
+Mở terminal tại thư mục gốc backend `nextjs_prisma_base` (đảm bảo backend đang chạy `pnpm dev`):
+
+- **Trên Linux / macOS (Bash / Zsh):**
+
+  ```bash
+  pnpm dlx @openapitools/openapi-generator-cli generate \
+    -i http://localhost:3000/api/v1/openapi.json \
+    -g dart-dio \
+    -o ../flutter_base_v2/packages/api_client \
+    --additional-properties=pubName=api_client
+  ```
+
+- **Trên Windows (PowerShell):**
+
+  ```powershell
+  pnpm dlx @openapitools/openapi-generator-cli generate `
+    -i http://localhost:3000/api/v1/openapi.json `
+    -g dart-dio `
+    -o ../flutter_base_v2/packages/api_client `
+    --additional-properties=pubName=api_client
+  ```
+
+- **Trên Windows (CMD):**
+  ```cmd
+  pnpm dlx @openapitools/openapi-generator-cli generate ^
+    -i http://localhost:3000/api/v1/openapi.json ^
+    -g dart-dio ^
+    -o ../flutter_base_v2/packages/api_client ^
+    --additional-properties=pubName=api_client
+  ```
+
+#### 3. Chạy build_runner cho package built_value:
+
+Sau khi lệnh CLI chạy xong, chuyển vào thư mục package để sinh các file `.g.dart` của `built_value`:
+
+```bash
+cd ../flutter_base_v2/packages/api_client
+fvm flutter pub get
+fvm dart run build_runner build --delete-conflicting-outputs
+```
+
+#### 4. Cách gọi trong Flutter (BuiltValue):
+
+```dart
+import 'package:api_client/api_client.dart';
 
 void main() async {
-  final dio = Dio(BaseOptions(baseUrl: 'http://localhost:3000/api/v1'));
-  final api = ApiClient(dio: dio);
+  final client = ApiClient(basePathOverride: 'http://localhost:3000');
 
-  try {
-    // 1. Gọi API Đăng nhập
-    //
-    // ⚠️ Trường là `identifier`, KHÔNG phải `email` — một ô nhận cả email lẫn
-    // tên đăng nhập (xem `loginSchema` trong src/schemas/auth.schema.ts).
-    // Gửi `email` thì server trả 422 và thông báo lỗi trỏ vào `identifier`.
-    final response = await api.getAuthApi().authLoginPost(
-      loginRequest: LoginRequestBuilder()
-        ..identifier = 'dev.admin@example.com'
-        ..password = 'devpassword123'
-    );
+  // Tạo request thông qua Builder của built_value
+  final request = (LoginRequestBuilder()
+    ..identifier = 'admin@example.com'
+    ..password = '12345678'
+  ).build();
 
-    // ⚠️ HAI lớp `data`: `response.data` là body HTTP, `.data` bên trong là
-    // envelope `{ data: ... }` mà API luôn bọc (xem src/lib/api/response.ts).
-    final accessToken = response.data?.data.accessToken;
-    print('Token: $accessToken');
-
-    // 2. Gọi API với Bearer Token
-    dio.options.headers['Authorization'] = 'Bearer $accessToken';
-    final userRes = await api.getAuthApi().authMeGet();
-    print('Current User: ${userRes.data?.data.user.email}');
-  } catch (e) {
-    print('Error calling API: $e');
-  }
+  final res = await client.getAuthApi().postAuthLogin(loginRequest: request);
+  print('Token: ${res.data?.data?.accessToken}');
 }
 ```
 
@@ -342,31 +193,22 @@ pnpm dlx openapi-typescript http://localhost:3000/api/v1/openapi.json -o ./src/t
 ```
 
 Lệnh này chạy giống nhau ở macOS, Linux và Windows vì nó nằm gọn trên một dòng.
-Khác với `openapi-generator-cli`, `openapi-typescript` là công cụ Node thuần —
-**không cần Java**.
 
 ---
 
-## 4b. Lệnh sinh code báo lỗi — tra ở đây trước
+## 5. Bảng tra cứu lỗi thường gặp khi sinh Code
 
-| Thông báo bạn thấy                                                           | Nguyên nhân thật                                                                           |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `Error: Unable to access jarfile` · `'java' is not recognized` · `JAVA_HOME` | **Chưa cài Java.** `openapi-generator-cli` là vỏ Node bọc file JAR — xem Bước 2.           |
-| PowerShell: `The token '\' is not a valid statement separator`               | Dán lệnh dùng `\` của bash vào PowerShell. Đổi sang backtick, hoặc dùng bản một dòng.      |
-| CMD: `'-i' is not recognized as an internal or external command`             | Cùng nguyên nhân trên, ở CMD. Đổi `\` thành `^`.                                           |
-| PowerShell nối dòng vẫn lỗi dù đã dùng backtick                              | Có **dấu cách thừa** sau backtick. Nó phải là ký tự cuối dòng, không có gì phía sau.       |
-| `ECONNREFUSED` · `connect ECONNREFUSED 127.0.0.1:3000`                       | Server Next chưa chạy. Bật `pnpm dev` ở một cửa sổ khác rồi thử lại.                       |
-| `404` khi tải `openapi.json`                                                 | Sai đường dẫn — phải có `/v1`: `/api/v1/openapi.json`.                                     |
-| Sinh code xong nhưng thiếu endpoint mới thêm                                 | Đặc tả sinh lúc chạy từ Zod schema. Khởi động lại `pnpm dev` rồi sinh lại.                 |
-| Windows: `EPERM` · `path too long`                                           | Đường dẫn Windows giới hạn 260 ký tự. Chuyển dự án lên gần gốc ổ đĩa (ví dụ `C:\src\app`). |
-
-Vẫn không được thì bỏ hẳn công cụ sinh code: mở
-`http://localhost:3000/docs`, xem hợp đồng API rồi viết model bằng tay. Với một
-dự án chỉ dùng vài endpoint, cách đó nhiều khi còn nhanh hơn.
+| Thông báo bạn thấy                                             | Nguyên nhân                                                  | Cách khắc phục                                                |
+| :------------------------------------------------------------- | :----------------------------------------------------------- | :------------------------------------------------------------ |
+| `Error: Unable to access jarfile` / `'java' is not recognized` | Chưa cài Java khi chạy **Cách 2** (`dart-dio`).              | Cài JDK 17 hoặc chuyển sang dùng **Cách 1** (không cần Java). |
+| `ECONNREFUSED` / `connect ECONNREFUSED 127.0.0.1:3000`         | Server Next.js chưa được bật.                                | Mở terminal chạy `pnpm dev` trước khi gen code.               |
+| `404` khi tải `openapi.json`                                   | Sai đường dẫn spec.                                          | Kiểm tra lại URL phải có `/v1`: `/api/v1/openapi.json`.       |
+| Sinh code xong nhưng thiếu endpoint mới                        | Đặc tả sinh tự động từ Zod Schema.                           | Khởi động lại `pnpm dev` rồi chạy lại lệnh gen.               |
+| `InvalidOutputException` khi chạy `build_runner`               | Cache `.dart_tool/build` bị xung đột do xóa/tạo lại package. | Chạy `fvm dart run build_runner clean` rồi chạy lại lệnh.     |
 
 ---
 
-## 5. Bảng tổng hợp các Endpoint REST API (`/api/v1/**`)
+## 6. Bảng tổng hợp các Endpoint REST API (`/api/v1/**`)
 
 | Nhóm API     | Endpoint                            |   Quyền hạn   | Mô tả                                               |
 | :----------- | :---------------------------------- | :-----------: | :-------------------------------------------------- |
