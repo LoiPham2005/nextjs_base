@@ -1,6 +1,6 @@
 .PHONY: help setup install dev build start check lint lint-fix typecheck test test-watch \
         test-coverage format format-check \
-        db-generate db-migrate db-deploy db-studio db-seed db-seed-dev db-seed-prod db-reset db-purge \
+        db-generate db-migrate db-migrate-create db-migrate-diff db-push db-deploy db-studio db-seed db-seed-dev db-seed-prod db-reset db-purge \
         docker-build docker-up docker-down docker-logs docker-ps \
         realtime docker-deploy docker-size docker-clean \
         vps-deploy vps-logs vps-status vps-files \
@@ -28,7 +28,10 @@ help:
 	@echo "  make format          - Prettier (format-check để chỉ kiểm tra)"
 	@echo ""
 	@echo "--- DATABASE ---"
-	@echo "  make db-migrate      - Tạo migration mới (dev)"
+	@echo "  make db-migrate      - Tạo migration mới và áp dụng (dev)"
+	@echo "  make db-migrate-create - Tự sinh file SQL migration (không chạm vào DB)"
+	@echo "  make db-migrate-diff - Xem trước mã SQL khác biệt giữa Database và schema.prisma"
+	@echo "  make db-push         - Đẩy trực tiếp schema lên database (không tạo migration)"
 	@echo "  make db-deploy       - Áp migration đã có (production)"
 	@echo "  make db-generate     - Sinh Prisma Client"
 	@echo "  make db-studio       - Mở Prisma Studio"
@@ -124,6 +127,15 @@ db-generate:
 
 db-migrate:
 	pnpm db:migrate
+
+db-migrate-create:
+	pnpm db:migrate:create
+
+db-migrate-diff:
+	pnpm db:migrate:diff
+
+db-push:
+	pnpm db:push
 
 db-deploy:
 	pnpm db:deploy
