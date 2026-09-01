@@ -1,0 +1,191 @@
+# 🚀 Hướng Dẫn Kiến Trúc & Lộ Trình Phát Triển Hệ Thống RBAC & Auth (Next.js + Prisma)
+
+Tài liệu này cung cấp hướng dẫn toàn diện về kiến trúc phân quyền **RBAC (Role-Based Access Control)**, cơ chế xác thực bảo mật và các bước triển khai/mở rộng trong dự án `nextjs_prisma_base`.
+
+---
+
+## 📌 1. Triết Lý Thiết Kế & Kiến Trúc
+
+### 1.1. Tại sao KHÔNG tách riêng bảng `Admin` và bảng `User`?
+- **Tránh trùng lặp mã nguồn (DRY):** Hệ thống xác thực (Bcrypt hash, JWT access token, Refresh Token rotation, OAuth Google/Github/Apple, OTP Email) được dùng chung cho mọi đối tượng.
+- **Dễ mở rộng vai trò (Extensibility):** Hỗ trợ thêm nhiều vai trò mới như `SUPER_ADMIN`, `ADMIN`, `MODERATOR`, `ACCOUNTANT`, `USER`, `VIP_USER` mà không cần sửa cấu trúc bảng cơ sở dữ liệu.
+- **Tối ưu quan hệ dữ liệu (Data Integrity):** Các bảng nghiệp vụ (`AuditLog`, `Order`, `Post`, `Comment`...) chỉ cần trỏ khóa ngoại `userId` duy nhất về bảng `User`.
+
+### 1.2. Sơ đồ dữ liệu (Entity Relationship Diagram)
+
+```mermaid
+erDiagram
+    Role ||--o{ RolePermission : "has"
+    Permission ||--o{ RolePermission : "belongs to"
+    Role ||--o{ User : "assigned to"
+    User ||--o{ Account : "OAuth links"
+    User ||--o{ RefreshToken : "sessions"
+    User ||--o{ VerificationToken : "OTP/Reset tokens"
+    User ||--o{ AuditLog : "acts on"
+
+    Role {
+        string id PK
+        string key UK "ADMIN | USER | MODERATOR"
+        string name
+        boolean isSystem "Không cho phép xóa nếu true"
+    }
+
+    Permission {
+        string id PK
+        string key UK "user:read | user:create | role:update"
+        string description
+    }
+
+    RolePermission {
+        string roleId PK,FK
+        string permissionId PK,FK
+    }
+
+    User {
+        string id PK
+        string email UK
+        string password
+        string roleId FK
+        enum status "ACTIVE | INACTIVE | BANNED"
+        int failedLoginAttempts
+        datetime lockedUntil
+        datetime deletedAt "Soft delete"
+    }
+```
+
+---
+
+## 🛠️ 2. Quy Trình Hoạt Động Cốt Lõi (Core Workflows)
+
+### 2.1. Luồng Xác thực (Authentication)
+1. **Đăng nhập (Password hoặc OAuth):**
+   - Kiểm tra `status === ACTIVE` và `lockedUntil < now()`.
+   - Nếu đăng nhập sai quá số lần quy định (`failedLoginAttempts >= 5`) -> Khóa tạm thời tài khoản (`lockedUntil = now() + 15m`).
+   - Cấp cặp Token:
+     - **Access Token (JWT ngắn hạn - 15 phút):** Chứa `userId`, `roleKey`, và danh sách `permissions` (hoặc truy vấn nhanh qua cache Redis).
+     - **Refresh Token (Dài hạn - 7 ngày):** Lưu bản băm `tokenHash` trong bảng `RefreshToken` (áp dụng Refresh Token Rotation chống trộm token).
+
+2. **Đăng xuất:**
+   - Cập nhật `revokedAt = now()` trong bảng `RefreshToken` tương ứng với session hiện tại.
+
+---
+
+### 2.2. Luồng Phân Quyền (Authorization Flow)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client
+    participant Middleware as Next.js Middleware / Route Handler
+    participant Guard as Permission Guard / RBAC Service
+    participant Cache as Redis / In-Memory Cache
+    participant DB as PostgreSQL (Prisma)
+
+    Client->>Middleware: Gửi Request kèm Access Token (Bearer)
+    Middleware->>Guard: Kiểm tra tính hợp lệ của Token & Route
+    Guard->>Cache: Lấy Permissions của User theo RoleId
+    alt Cache Miss
+        Guard->>DB: Query Role & Permissions từ DB
+        DB-->>Guard: Danh sách Permissions
+        Guard->>Cache: Lưu Cache (TTL 5-10m)
+    end
+    Guard-->>Middleware: Kiểm tra User có Permission yêu cầu không? (vd: 'user:delete')
+    alt Đủ quyền
+        Middleware->>Client: Trả về kết quả (200 OK)
+    else Thiếu quyền
+        Middleware->>Client: 403 Forbidden
+    end
+```
+
+---
+
+## 📋 3. Lộ Trình Triển Khai & Phát Triển (Development Roadmap)
+
+### Giai Đoạn 1: Seeding Dữ Liệu & Khởi Tạo Phân Quyền Cơ Bản
+- [ ] **Tạo Permissions chuẩn theo chuẩn `resource:action`**:
+  - Quản lý người dùng: `user:read`, `user:create`, `user:update`, `user:delete`, `user:ban`
+  - Quản lý vai trò & quyền: `role:read`, `role:create`, `role:update`, `role:delete`
+  - Nhật ký hệ thống: `audit:read`
+- [ ] **Tạo Roles mặc định (`isSystem: true`)**:
+  - `SUPER_ADMIN`: Toàn quyền tất cả permissions.
+  - `ADMIN`: Quản lý người dùng và nghiệp vụ thông thường.
+  - `USER`: Quyền cơ bản (đọc thông tin của chính mình, cập nhật profile).
+- [ ] Viết file `prisma/seed.ts` để tự động khởi tạo khi setup dự án.
+
+---
+
+### Giai Đoạn 2: Xây Dựng Service & Middleware Bảo Vệ
+- [ ] **Tạo Utility / Decorator kiểm tra quyền (`requirePermission`)**:
+  ```typescript
+  // Ví dụ hàm guard kiểm tra quyền trong Route Handler
+  export async function checkPermission(userId: string, requiredPermission: string): Promise<boolean> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        role: {
+          include: {
+            permissions: {
+              include: { permission: true }
+            }
+          }
+        }
+      }
+    });
+
+    if (!user || user.status !== 'ACTIVE') return false;
+    if (user.role.key === 'SUPER_ADMIN') return true; // Super admin bypass
+
+    return user.role.permissions.some(
+      (rp) => rp.permission.key === requiredPermission
+    );
+  }
+  ```
+- [ ] Tích hợp ghi `AuditLog` tự động mỗi khi có thay đổi quan trọng (gán quyền, khóa tài khoản, đổi mật khẩu).
+
+---
+
+### Giai Đoạn 3: Nâng Cấp Nâng Cao (Khi Hệ Thống Phát Triển Lớn)
+
+#### 1. Tách Hồ Sơ Người Dùng (`UserProfile`)
+Tránh để bảng `User` bị phình to khi thêm các trường như địa chỉ, ảnh đại diện, ngày sinh, CCCD/CMND:
+```prisma
+model UserProfile {
+  id          String    @id @default(cuid())
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName    String?
+  avatarUrl   String?
+  phoneNumber String?
+  address     String?
+  birthday    DateTime?
+
+  @@map("user_profiles")
+}
+```
+
+#### 2. Chuyển Sang Mô Hình Multi-Role (Nếu 1 User có nhiều vai trò)
+Nếu nghiệp vụ yêu cầu một người vừa làm `STAFF` vừa làm `ACCOUNTANT`:
+```prisma
+model UserRole {
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+```
+
+#### 3. Tối Ưu Hiệu Năng Với Redis Cache
+- Cache danh sách `permissions` của từng `roleKey` vào Redis với TTL ngắn (5 - 15 phút).
+- Khi Admin cập nhật quyền của Role -> Xóa cache (Cache Invalidation) để quyền mới có hiệu lực ngay lập tức mà không cần chờ token hết hạn.
+
+---
+
+## 🔒 4. Best Practices Về Bảo Mật
+
+1. **Không bao giờ lưu Refresh Token dạng Plaintext:** Luôn băm trước khi lưu (`tokenHash = sha256(rawToken)`).
+2. **Refresh Token Rotation:** Mỗi lần cấp Access Token mới qua Refresh Token, hãy hủy Refresh Token cũ và sinh Refresh Token mới.
+3. **Bảo vệ System Roles:** Không cho phép API sửa/xóa các Role có `isSystem: true` (ví dụ `SUPER_ADMIN`).
+4. **Soft Delete (`deletedAt`):** Không xóa cứng `User` trong DB để đảm bảo tính toàn vẹn dữ liệu lịch sử và Audit Log.
