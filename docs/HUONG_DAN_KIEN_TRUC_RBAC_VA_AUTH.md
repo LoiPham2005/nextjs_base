@@ -24,6 +24,8 @@ erDiagram
     User ||--o| UserProfile : "has profile"
     User ||--o{ Account : "OAuth links"
     User ||--o{ RefreshToken : "sessions"
+    User ||--o{ Device : "push tokens"
+    User ||--o{ Notification : "in-app alerts"
     User ||--o{ VerificationToken : "OTP/Reset tokens"
     User ||--o{ AuditLog : "acts on"
 
@@ -272,7 +274,72 @@ export async function getUserEffectivePermissions(userId: string): Promise<strin
 
 ---
 
-## 🔒 4. Best Practices Về Bảo Mật
+### Giai Đoạn 4: Push Notification & Quản Lý Đa Thiết Bị (Device & In-App Notification)
+
+#### 1. Tại sao `RefreshToken` KHÔNG THỂ thay thế bảng `Device`?
+- **`RefreshToken` (Session Auth):** Vòng đời ngắn, thay đổi liên tục khi xoay vòng token (Refresh Token Rotation) hoặc bị xóa khi hết hạn (7-30 ngày). 1 máy mở nhiều tab có thể sinh nhiều dòng `RefreshToken`.
+- **`Device` (FCM Token / Push Token):** Vòng đời dài (gắn liền với thiết bị cho đến khi gỡ app). 1 máy vật lý chỉ có **đúng 1 FCM Token duy nhất**. Nếu nhét vào `RefreshToken`, khi gửi push khách hàng sẽ bị nổ chuông trùng lặp 5-10 lần cho 1 thông báo!
+
+#### 2. Cấu Trúc Bảng Device & Notification
+```prisma
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
+model Device {
+  id         String         @id @default(cuid())
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform   DevicePlatform // IOS | ANDROID | WEB
+  fcmToken   String         // Token nhận push từ Firebase FCM / APNs
+  deviceId   String?        // UUID phần cứng máy
+  deviceName String?        // "iPhone 15 Pro", "Chrome Windows"
+  isActive   Boolean        @default(true)
+  lastSeenAt DateTime       @default(now())
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@unique([userId, fcmToken])
+  @@index([userId])
+  @@index([fcmToken])
+  @@map("devices")
+}
+
+enum NotificationType {
+  SYSTEM    // Thông báo chung từ hệ thống
+  ORDER     // Đơn hàng / Đặt chỗ
+  PAYMENT   // Thanh toán
+  SECURITY  // Cảnh báo bảo mật (đổi pass, login lạ)
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String           // Tiêu đề
+  body      String           // Nội dung
+  type      NotificationType @default(SYSTEM)
+  data      Json?            // Payload đính kèm (vd: { "orderId": "123", "url": "/orders/123" })
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+```
+
+#### 3. Quy Trình Gửi Push Notification (Flow)
+1. **Client (Mobile/Web):** Đăng nhập -> Lấy `fcmToken` từ Firebase SDK -> Gọi API `POST /api/devices/register` lưu vào bảng `Device`.
+2. **Backend (Event Trigger):** Khi có sự kiện (vd: Đơn hàng thành công) -> Lưu vào bảng `Notification` -> Lấy tất cả `fcmToken` của `userId` từ bảng `Device` -> Đẩy Job vào **BullMQ Worker**.
+3. **Queue Worker:** Worker gọi Firebase Admin SDK (`sendEachForMulticast`) để bắn thông báo tức thì đến tất cả thiết bị của người dùng. Nếu Firebase báo token hết hạn -> Tự động xóa bản ghi trong bảng `Device`.
+
+---
+
+## 🔒 5. Best Practices Về Bảo Mật
 
 1. **Không bao giờ lưu Refresh Token dạng Plaintext:** Luôn băm trước khi lưu (`tokenHash = sha256(rawToken)`).
 2. **Refresh Token Rotation:** Mỗi lần cấp Access Token mới qua Refresh Token, hãy hủy Refresh Token cũ và sinh Refresh Token mới.
