@@ -25,7 +25,8 @@ erDiagram
     User ||--o{ Account : "OAuth links"
     User ||--o{ RefreshToken : "sessions"
     User ||--o{ Device : "push tokens"
-    User ||--o{ Notification : "in-app alerts"
+    Notification ||--o{ NotificationRecipient : "sent to"
+    User ||--o{ NotificationRecipient : "receives"
     User ||--o{ VerificationToken : "OTP/Reset tokens"
     User ||--o{ AuditLog : "acts on"
 
@@ -274,13 +275,17 @@ export async function getUserEffectivePermissions(userId: string): Promise<strin
 
 ---
 
-### Giai Đoạn 4: Push Notification & Quản Lý Đa Thiết Bị (Device & In-App Notification)
+### Giai Đoạn 4: Push Notification Chuẩn Enterprise (Direct, Topic & Broadcast)
 
 #### 1. Tại sao `RefreshToken` KHÔNG THỂ thay thế bảng `Device`?
 - **`RefreshToken` (Session Auth):** Vòng đời ngắn, thay đổi liên tục khi xoay vòng token (Refresh Token Rotation) hoặc bị xóa khi hết hạn (7-30 ngày). 1 máy mở nhiều tab có thể sinh nhiều dòng `RefreshToken`.
 - **`Device` (FCM Token / Push Token):** Vòng đời dài (gắn liền với thiết bị cho đến khi gỡ app). 1 máy vật lý chỉ có **đúng 1 FCM Token duy nhất**. Nếu nhét vào `RefreshToken`, khi gửi push khách hàng sẽ bị nổ chuông trùng lặp 5-10 lần cho 1 thông báo!
 
-#### 2. Cấu Trúc Bảng Device & Notification
+#### 2. Vấn đề "Gửi 1 tin cho 1.000.000 người" và Mô hình 2 bảng chuẩn
+> ❌ **Nếu dùng 1 bảng `Notification (userId, title, body)`:** Khi gửi 1 tin khuyến mãi cho 1.000.000 người, DB phải insert 1.000.000 dòng lặp lại cùng một đoạn text -> Phình to hàng trăm MB, nghẽn DB.  
+> ✅ **Chuẩn Enterprise (Tách 2 bảng):** Bảng `Notification` chỉ lưu **1 dòng nội dung gốc**, còn bảng `NotificationRecipient` lưu trạng thái đọc/nhận của từng người -> Tiết kiệm 94% dung lượng DB.
+
+#### 3. Cấu Trúc Schema Chuẩn Cho Device & Notification Hệ Thống
 ```prisma
 enum DevicePlatform {
   IOS
@@ -288,6 +293,7 @@ enum DevicePlatform {
   WEB
 }
 
+// 1. Quản lý thiết bị nhận Push FCM (1 User có nhiều thiết bị)
 model Device {
   id         String         @id @default(cuid())
   userId     String
@@ -308,40 +314,68 @@ model Device {
 }
 
 enum NotificationType {
-  SYSTEM    // Thông báo chung từ hệ thống
-  ORDER     // Đơn hàng / Đặt chỗ
-  PAYMENT   // Thanh toán
-  SECURITY  // Cảnh báo bảo mật (đổi pass, login lạ)
+  DIRECT     // Gửi 1-1 (Đơn hàng, Nạp tiền, Cảnh báo bảo mật)
+  TOPIC      // Gửi theo nhóm (Theo cơ sở chi nhánh, Toàn bộ Nhân viên)
+  BROADCAST  // Gửi toàn sàn (Bảo trì hệ thống, Khuyến mãi Tết)
 }
 
+// 2. Nội dung thông báo gốc (Chỉ lưu 1 bản ghi duy nhất dù gửi cho hàng triệu người)
 model Notification {
-  id        String           @id @default(cuid())
-  userId    String
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title     String           // Tiêu đề
-  body      String           // Nội dung
-  type      NotificationType @default(SYSTEM)
-  data      Json?            // Payload đính kèm (vd: { "orderId": "123", "url": "/orders/123" })
-  isRead    Boolean          @default(false)
-  readAt    DateTime?
-  createdAt DateTime         @default(now())
+  id          String           @id @default(cuid())
+  title       String           // Tiêu đề
+  body        String           // Nội dung chi tiết
+  imageUrl    String?          // Ảnh banner / Thumbnail thông báo
+  type        NotificationType @default(DIRECT)
+  actionUrl   String?          // Điều hướng khi bấm: "/orders/123", "https://..."
+  data        Json?            // Metadata tùy biến { "orderId": "123", "code": "SALE50" }
+  senderId    String?          // ID người gửi (Admin/System)
+  createdAt   DateTime         @default(now())
 
-  @@index([userId, isRead])
-  @@index([userId, createdAt])
+  recipients  NotificationRecipient[]
+
+  @@index([type, createdAt])
   @@map("notifications")
+}
+
+// 3. Trạng thái nhận & đọc của từng người nhận (Siêu nhẹ, query chuông 🔔 cực nhanh)
+model NotificationRecipient {
+  id             String       @id @default(cuid())
+  notificationId String
+  userId         String
+  
+  isRead         Boolean      @default(false) // Đã bấm xem ở chuông 🔔 chưa
+  readAt         DateTime?
+  isPushed       Boolean      @default(false) // Push FCM tới thiết bị thành công chưa
+  pushedAt       DateTime?
+  
+  createdAt      DateTime     @default(now())
+
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId]) // 1 người không nhận trùng 1 tin
+  @@index([userId, isRead])          // Đếm nhanh: Số thông báo chưa đọc
+  @@index([userId, createdAt])       // Phân trang danh sách thông báo của user
+  @@map("notification_recipients")
 }
 ```
 
-#### 3. Quy Trình Gửi Push Notification (Flow)
-1. **Client (Mobile/Web):** Đăng nhập -> Lấy `fcmToken` từ Firebase SDK -> Gọi API `POST /api/devices/register` lưu vào bảng `Device`.
-2. **Backend (Event Trigger):** Khi có sự kiện (vd: Đơn hàng thành công) -> Lưu vào bảng `Notification` -> Lấy tất cả `fcmToken` của `userId` từ bảng `Device` -> Đẩy Job vào **BullMQ Worker**.
-3. **Queue Worker:** Worker gọi Firebase Admin SDK (`sendEachForMulticast`) để bắn thông báo tức thì đến tất cả thiết bị của người dùng. Nếu Firebase báo token hết hạn -> Tự động xóa bản ghi trong bảng `Device`.
+#### 4. Quy Trình Gửi Thông Báo (Direct & Broadcast Flow)
+1. **Đăng ký thiết bị:** Mobile/Web login -> Firebase SDK lấy `fcmToken` -> Gọi API `POST /api/devices/register` lưu vào bảng `Device`.
+2. **Kích hoạt gửi (Trigger Event):**
+   - **Gửi 1-1 (Direct):** Tạo `Notification` + 1 dòng `NotificationRecipient` -> Lấy `fcmTokens` của user từ bảng `Device` -> Đẩy Job vào Queue.
+   - **Gửi Hàng Loạt (Broadcast / Topic):** Tạo 1 `Notification` -> Bulk insert `NotificationRecipient` cho tệp user -> Đẩy Job chia nhỏ (chunk 500-1000 tokens) vào **BullMQ Worker**.
+3. **Queue Worker thực thi:**
+   - Worker gọi Firebase Admin SDK (`sendEachForMulticast`) bắn push tới hàng loạt thiết bị.
+   - Cập nhật `isPushed: true`.
+   - Nếu Firebase báo `registration-token-not-registered` (user đã gỡ app) -> Worker tự động dọn dẹp bản ghi chết trong bảng `Device`.
 
 ---
 
-## 🔒 5. Best Practices Về Bảo Mật
+## 🔒 5. Best Practices Về Bảo Mật & Vận Hành
 
 1. **Không bao giờ lưu Refresh Token dạng Plaintext:** Luôn băm trước khi lưu (`tokenHash = sha256(rawToken)`).
 2. **Refresh Token Rotation:** Mỗi lần cấp Access Token mới qua Refresh Token, hãy hủy Refresh Token cũ và sinh Refresh Token mới.
 3. **Bảo vệ System Roles:** Không cho phép API sửa/xóa các Role có `isSystem: true` (ví dụ `SUPER_ADMIN`).
 4. **Soft Delete (`deletedAt`):** Không xóa cứng `User` trong DB để đảm bảo tính toàn vẹn dữ liệu lịch sử và Audit Log.
+5. **Dọn dẹp Token chết định kỳ:** Thiết lập Cronjob xóa các `RefreshToken` đã hết hạn quá 30 ngày để tối ưu dung lượng DB.
