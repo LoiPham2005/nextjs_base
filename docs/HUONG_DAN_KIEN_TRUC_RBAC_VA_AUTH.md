@@ -22,9 +22,9 @@ erDiagram
     User ||--o{ UserPermission : "direct grants/revokes"
     Permission ||--o{ UserPermission : "applied to"
     User ||--o| UserProfile : "has profile"
-    User ||--o{ Account : "OAuth links"
+    User ||--o{ OAuthAccount : "OAuth links"
     User ||--o{ RefreshToken : "sessions"
-    User ||--o{ Device : "push tokens"
+    User ||--o{ UserDevice : "push tokens"
     Notification ||--o{ NotificationRecipient : "sent to"
     User ||--o{ NotificationRecipient : "receives"
     User ||--o{ VerificationToken : "OTP/Reset tokens"
@@ -277,15 +277,15 @@ export async function getUserEffectivePermissions(userId: string): Promise<strin
 
 ### Giai Đoạn 4: Push Notification Chuẩn Enterprise (Direct, Topic & Broadcast)
 
-#### 1. Tại sao `RefreshToken` KHÔNG THỂ thay thế bảng `Device`?
+#### 1. Tại sao `RefreshToken` KHÔNG THỂ thay thế bảng `UserDevice`?
 - **`RefreshToken` (Session Auth):** Vòng đời ngắn, thay đổi liên tục khi xoay vòng token (Refresh Token Rotation) hoặc bị xóa khi hết hạn (7-30 ngày). 1 máy mở nhiều tab có thể sinh nhiều dòng `RefreshToken`.
-- **`Device` (FCM Token / Push Token):** Vòng đời dài (gắn liền với thiết bị cho đến khi gỡ app). 1 máy vật lý chỉ có **đúng 1 FCM Token duy nhất**. Nếu nhét vào `RefreshToken`, khi gửi push khách hàng sẽ bị nổ chuông trùng lặp 5-10 lần cho 1 thông báo!
+- **`UserDevice` (FCM Token / Push Token):** Vòng đời dài (gắn liền với thiết bị cho đến khi gỡ app). 1 máy vật lý chỉ có **đúng 1 FCM Token duy nhất**. Nếu nhét vào `RefreshToken`, khi gửi push khách hàng sẽ bị nổ chuông trùng lặp 5-10 lần cho 1 thông báo!
 
 #### 2. Vấn đề "Gửi 1 tin cho 1.000.000 người" và Mô hình 2 bảng chuẩn
 > ❌ **Nếu dùng 1 bảng `Notification (userId, title, body)`:** Khi gửi 1 tin khuyến mãi cho 1.000.000 người, DB phải insert 1.000.000 dòng lặp lại cùng một đoạn text -> Phình to hàng trăm MB, nghẽn DB.  
 > ✅ **Chuẩn Enterprise (Tách 2 bảng):** Bảng `Notification` chỉ lưu **1 dòng nội dung gốc**, còn bảng `NotificationRecipient` lưu trạng thái đọc/nhận của từng người -> Tiết kiệm 94% dung lượng DB.
 
-#### 3. Cấu Trúc Schema Chuẩn Cho Device & Notification Hệ Thống
+#### 3. Cấu Trúc Schema Chuẩn Cho UserDevice & Notification Hệ Thống
 ```prisma
 enum DevicePlatform {
   IOS
@@ -294,7 +294,7 @@ enum DevicePlatform {
 }
 
 // 1. Quản lý thiết bị nhận Push FCM (1 User có nhiều thiết bị)
-model Device {
+model UserDevice {
   id         String         @id @default(cuid())
   userId     String
   user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -310,7 +310,7 @@ model Device {
   @@unique([userId, fcmToken])
   @@index([userId])
   @@index([fcmToken])
-  @@map("devices")
+  @@map("user_devices")
 }
 
 enum NotificationType {
@@ -361,14 +361,14 @@ model NotificationRecipient {
 ```
 
 #### 4. Quy Trình Gửi Thông Báo (Direct & Broadcast Flow)
-1. **Đăng ký thiết bị:** Mobile/Web login -> Firebase SDK lấy `fcmToken` -> Gọi API `POST /api/devices/register` lưu vào bảng `Device`.
+1. **Đăng ký thiết bị:** Mobile/Web login -> Firebase SDK lấy `fcmToken` -> Gọi API `POST /api/devices/register` lưu vào bảng `UserDevice`.
 2. **Kích hoạt gửi (Trigger Event):**
-   - **Gửi 1-1 (Direct):** Tạo `Notification` + 1 dòng `NotificationRecipient` -> Lấy `fcmTokens` của user từ bảng `Device` -> Đẩy Job vào Queue.
+   - **Gửi 1-1 (Direct):** Tạo `Notification` + 1 dòng `NotificationRecipient` -> Lấy `fcmTokens` của user từ bảng `UserDevice` -> Đẩy Job vào Queue.
    - **Gửi Hàng Loạt (Broadcast / Topic):** Tạo 1 `Notification` -> Bulk insert `NotificationRecipient` cho tệp user -> Đẩy Job chia nhỏ (chunk 500-1000 tokens) vào **BullMQ Worker**.
 3. **Queue Worker thực thi:**
    - Worker gọi Firebase Admin SDK (`sendEachForMulticast`) bắn push tới hàng loạt thiết bị.
    - Cập nhật `isPushed: true`.
-   - Nếu Firebase báo `registration-token-not-registered` (user đã gỡ app) -> Worker tự động dọn dẹp bản ghi chết trong bảng `Device`.
+   - Nếu Firebase báo `registration-token-not-registered` (user đã gỡ app) -> Worker tự động dọn dẹp bản ghi chết trong bảng `UserDevice`.
 
 ---
 

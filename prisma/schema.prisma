@@ -6,15 +6,19 @@ datasource db {
   provider = "postgresql"
 }
 
+// ============================================================
+// 1. PHÂN QUYỀN RBAC ĐA TẦNG (MULTI-ROLE & GRANULAR PERMISSIONS)
+// ============================================================
+
 model Role {
   id          String  @id @default(cuid())
-  key         String  @unique // Mã vai trò cố định (VD: ADMIN, USER)
-  name        String  // Tên hiển thị
+  key         String  @unique // Mã vai trò cố định (VD: SUPER_ADMIN, ADMIN, USER, STAFF)
+  name        String // Tên hiển thị tiếng Việt (Quản trị viên, Nhân viên...)
   description String?
-  isSystem    Boolean @default(false) // Vai trò hệ thống (không được xóa)
+  isSystem    Boolean @default(false) // Vai trò cốt lõi hệ thống (không được xóa)
 
   permissions RolePermission[]
-  users       User[]
+  userRoles   UserRole[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -24,16 +28,21 @@ model Role {
 
 model Permission {
   id          String  @id @default(cuid())
-  key         String  @unique // Mã quyền hạn (VD: user:read, user:create)
+  key         String  @unique // Mã quyền hạn (VD: user:read, user:delete, order:create)
+  name        String // Tên hiển thị (Xem người dùng, Xóa người dùng...)
+  category    String // Nhóm hiển thị: "Quản lý User", "Đơn hàng", "Cài đặt"
   description String?
 
-  roles RolePermission[]
+  roles           RolePermission[]
+  userPermissions UserPermission[]
 
   createdAt DateTime @default(now())
 
+  @@index([category])
   @@map("permissions")
 }
 
+// Bảng trung gian 1 Role có Nhiều Permission (N - N)
 model RolePermission {
   roleId       String
   permissionId String
@@ -48,50 +57,134 @@ model RolePermission {
   @@map("role_permissions")
 }
 
-enum UserStatus {
-  ACTIVE    // Đang hoạt động
-  INACTIVE  // Chưa kích hoạt / Tạm ngưng
-  BANNED    // Bị khóa do vi phạm
+// Bảng trung gian 1 User có Nhiều Role (N - N)
+model UserRole {
+  userId     String
+  roleId     String
+  assignedBy String? // ID người gán role này (phục vụ audit)
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
 }
 
+// Bảng cấp/chặn quyền trực tiếp cho từng cá nhân (User-Level Override)
+model UserPermission {
+  userId       String
+  permissionId String
+  isGranted    Boolean  @default(true) // true = CẤP THÊM quyền, false = TƯỚC BỎ/CHẶN quyền
+  grantedBy    String? // ID của Admin đã cấp/chặn quyền này
+  createdAt    DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@index([permissionId])
+  @@map("user_permissions")
+}
+
+// ============================================================
+// 2. NGƯỜI DÙNG & TÁCH BIỆT HỒ SƠ (AUTHENTICATION & PROFILE)
+// ============================================================
+
+enum UserStatus {
+  ACTIVE // Đang hoạt động
+  INACTIVE // Chưa kích hoạt / Tạm ngưng
+  BANNED // Bị khóa do vi phạm
+}
+
+// Bảng User siêu nhẹ: CHỈ PHỤC VỤ XÁC THỰC & BẢO MẬT
 model User {
-  id                  String     @id @default(cuid())
-  email               String     @unique
-  password            String?    // Bcrypt hash (null nếu đăng nhập qua OAuth)
-  username            String?    @unique
-  fullName            String?
-  roleId              String
-  role                Role       @relation(fields: [roleId], references: [id])
-  emailVerifiedAt     DateTime?  // Thời điểm xác thực email
+  id       String  @id @default(cuid())
+  email    String? @unique
+  phone    String? @unique
+  username String? @unique
+  password String? // Bcrypt/Argon2 hash (null nếu chỉ đăng nhập qua OAuth)
+
   status              UserStatus @default(ACTIVE)
-  failedLoginAttempts Int        @default(0) // Số lần đăng nhập sai liên tiếp
-  lockedUntil         DateTime?  // Thời điểm hết hạn khóa tạm do sai pass
-  deletedAt           DateTime?  // Xóa mềm (null = còn hoạt động)
+  emailVerifiedAt     DateTime? // Thời điểm xác thực email
+  phoneVerifiedAt     DateTime? // Thời điểm xác thực số điện thoại
+  failedLoginAttempts Int        @default(0) // Số lần đăng nhập sai liên tiếp (chống brute-force)
+  lockedUntil         DateTime? // Thời điểm hết hạn khóa tạm do sai pass
+  deletedAt           DateTime? // Xóa mềm (null = còn hoạt động)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Quan hệ 1 - 1 với hồ sơ cá nhân
+  profile UserProfile?
+
+  // Quan hệ phân quyền
+  userRoles       UserRole[]
+  userPermissions UserPermission[]
+
+  // Quan hệ xác thực & phiên
   refreshTokens      RefreshToken[]
   verificationTokens VerificationToken[]
-  accounts           Account[]
+  oauthAccounts      OAuthAccount[]
 
-  @@index([createdAt])
-  @@index([roleId])
+  // Quan hệ thiết bị & thông báo
+  devices       UserDevice[]
+  notifications NotificationRecipient[]
+
+  // Nhật ký
+  auditLogs AuditLog[] @relation("UserAuditLogs")
+
   @@index([status])
+  @@index([createdAt])
   @@map("users")
 }
 
-model Account {
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+// Bảng UserProfile: CHỨA TOÀN BỘ THÔNG TIN CÁ NHÂN (1 - 1 với User)
+model UserProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  fullName  String?
+  avatarUrl String?
+  gender    Gender?
+  dob       DateTime? @db.Date
+  bio       String?   @db.Text
+  address   String?
+  city      String?
+  district  String?
+  country   String?   @default("VN")
+  metadata  Json? // Cấu hình tùy biến mở rộng
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_profiles")
+}
+
+// ============================================================
+// 3. TÀI KHOẢN OAUTH, TOKEN & PHIÊN ĐĂNG NHẬP
+// ============================================================
+
+// Đổi tên từ Account -> OAuthAccount (Rõ nghĩa 100%, tránh nhầm lẫn)
+model OAuthAccount {
   id                String   @id @default(cuid())
   userId            String
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider          String   // Google | Github | Facebook | Apple
-  providerAccountId String   // ID người dùng từ bên OAuth cung cấp
+  provider          String // google | apple | facebook | github
+  providerAccountId String // ID người dùng từ bên OAuth cung cấp
   createdAt         DateTime @default(now())
 
   @@unique([provider, providerAccountId])
   @@index([userId])
-  @@map("accounts")
+  @@map("oauth_accounts")
 }
 
 model RefreshToken {
@@ -99,10 +192,14 @@ model RefreshToken {
   tokenHash String    @unique // SHA-256 hash của refresh token
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId  String? // Gắn với UserDevice nào (nếu cần quản lý đăng xuất theo máy)
+  userAgent String?
+  ip        String?
   expiresAt DateTime
   revokedAt DateTime? // Thu hồi khi đăng xuất hoặc xoay vòng token
-  userAgent String?
   createdAt DateTime  @default(now())
+
+  device UserDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([expiresAt])
@@ -111,6 +208,7 @@ model RefreshToken {
 
 enum VerificationTokenType {
   EMAIL_VERIFICATION
+  PHONE_OTP
   PASSWORD_RESET
 }
 
@@ -121,7 +219,7 @@ model VerificationToken {
   userId    String
   user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
-  usedAt    DateTime?             // Đánh dấu khi token đã được sử dụng
+  usedAt    DateTime? // Đánh dấu khi token đã được sử dụng
   createdAt DateTime              @default(now())
 
   @@index([userId, type])
@@ -129,20 +227,104 @@ model VerificationToken {
   @@map("verification_tokens")
 }
 
+// ============================================================
+// 4. THIẾT BỊ & THÔNG BÁO CHUẨN ENTERPRISE (PUSH & IN-APP NOTI)
+// ============================================================
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
+// Quản lý thiết bị nhận Push FCM (1 User có nhiều thiết bị)
+model UserDevice {
+  id         String         @id @default(cuid())
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform   DevicePlatform // IOS | ANDROID | WEB
+  fcmToken   String // Token nhận push từ Firebase FCM / APNs
+  deviceId   String? // UUID phần cứng máy
+  deviceName String? // "iPhone 15 Pro", "Chrome Windows"
+  isActive   Boolean        @default(true)
+  lastSeenAt DateTime       @default(now())
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  refreshTokens RefreshToken[]
+
+  @@unique([userId, fcmToken])
+  @@index([userId])
+  @@index([fcmToken])
+  @@map("user_devices")
+}
+
+enum NotificationType {
+  DIRECT // Gửi 1-1 (Đơn hàng, Nạp tiền, Cảnh báo bảo mật)
+  TOPIC // Gửi theo nhóm (Theo chi nhánh, Toàn bộ Nhân viên)
+  BROADCAST // Gửi toàn sàn (Bảo trì hệ thống, Khuyến mãi Tết)
+}
+
+// Nội dung thông báo gốc (Chỉ lưu 1 bản ghi duy nhất dù gửi cho hàng triệu người)
+model Notification {
+  id        String           @id @default(cuid())
+  title     String // Tiêu đề
+  body      String // Nội dung chi tiết
+  imageUrl  String? // Ảnh banner / Thumbnail thông báo
+  type      NotificationType @default(DIRECT)
+  actionUrl String? // Điều hướng khi bấm: "/orders/123", "https://..."
+  data      Json? // Metadata tùy biến { "orderId": "123", "code": "SALE50" }
+  senderId  String? // ID người gửi (Admin/System)
+  createdAt DateTime         @default(now())
+
+  recipients NotificationRecipient[]
+
+  @@index([type, createdAt])
+  @@map("notifications")
+}
+
+// Trạng thái nhận & đọc của từng người nhận (Siêu nhẹ, query chuông 🔔 cực nhanh)
+model NotificationRecipient {
+  id             String @id @default(cuid())
+  notificationId String
+  userId         String
+
+  isRead   Boolean   @default(false) // Đã bấm xem ở chuông 🔔 chưa
+  readAt   DateTime?
+  isPushed Boolean   @default(false) // Push FCM tới thiết bị thành công chưa
+  pushedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId]) // 1 người không nhận trùng 1 tin
+  @@index([userId, isRead]) // Đếm nhanh: Số thông báo chưa đọc
+  @@index([userId, createdAt]) // Phân trang danh sách thông báo của user
+  @@map("notification_recipients")
+}
+
+// ============================================================
+// 5. NHẬT KÝ HỆ THỐNG (AUDIT LOG - ENTERPRISE AUDIT TRAIL)
+// ============================================================
+
 model AuditLog {
   id         String   @id @default(cuid())
-  actorId    String?  // ID người thực hiện (null nếu do hệ thống)
-  actorEmail String?  // Email người thực hiện
-  action     String   // Hành động (VD: user.created, role.updated)
-  entity     String   // Thực thể bị tác động (user, role,...)
-  entityId   String?  // ID thực thể bị tác động
-  metadata   Json?    // Chi tiết dữ liệu thay đổi
+  actorId    String? // ID người thực hiện (null nếu do hệ thống)
+  actorEmail String? // Email người thực hiện
+  action     String // Hành động (VD: user.banned, role.assigned, password.changed)
+  entity     String // Thực thể bị tác động (User, Role, Order...)
+  entityId   String? // ID thực thể bị tác động
+  metadata   Json? // Chi tiết dữ liệu trước & sau khi thay đổi
   ip         String?
   userAgent  String?
   createdAt  DateTime @default(now())
 
+  actor User? @relation("UserAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+
   @@index([createdAt])
   @@index([actorId, createdAt])
-  @@index([entity, entityId, createdAt])
+  @@index([entity, entityId])
   @@map("audit_logs")
 }
