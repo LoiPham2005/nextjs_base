@@ -17,7 +17,11 @@ Tài liệu này cung cấp hướng dẫn toàn diện về kiến trúc phân 
 erDiagram
     Role ||--o{ RolePermission : "has"
     Permission ||--o{ RolePermission : "belongs to"
-    Role ||--o{ User : "assigned to"
+    User ||--o{ UserRole : "has"
+    Role ||--o{ UserRole : "assigned to"
+    User ||--o{ UserPermission : "direct grants/revokes"
+    Permission ||--o{ UserPermission : "applied to"
+    User ||--o| UserProfile : "has profile"
     User ||--o{ Account : "OAuth links"
     User ||--o{ RefreshToken : "sessions"
     User ||--o{ VerificationToken : "OTP/Reset tokens"
@@ -39,6 +43,25 @@ erDiagram
     RolePermission {
         string roleId PK,FK
         string permissionId PK,FK
+    }
+
+    UserRole {
+        string userId PK,FK
+        string roleId PK,FK
+    }
+
+    UserPermission {
+        string userId PK,FK
+        string permissionId PK,FK
+        boolean isGranted "true = cấp thêm, false = tước bỏ"
+    }
+
+    UserProfile {
+        string id PK
+        string userId FK
+        string fullName
+        string avatarUrl
+        string phoneNumber
     }
 
     User {
@@ -177,9 +200,75 @@ model UserRole {
 }
 ```
 
-#### 3. Tối Ưu Hiệu Năng Với Redis Cache
-- Cache danh sách `permissions` của từng `roleKey` vào Redis với TTL ngắn (5 - 15 phút).
-- Khi Admin cập nhật quyền của Role -> Xóa cache (Cache Invalidation) để quyền mới có hiệu lực ngay lập tức mà không cần chờ token hết hạn.
+#### 3. Cấp / Chặn Quyền Trực Tiếp Cho Từng User (`UserPermission`)
+Giải quyết bài toán: **2 người có cùng vai trò `STAFF`, nhưng Nhân viên A được sếp cấp thêm quyền `order:delete` (hoặc bị tước quyền `order:create`), còn Nhân viên B thì không.**
+
+```prisma
+model UserPermission {
+  userId       String
+  permissionId String
+  isGranted    Boolean  @default(true) // true = CẤP THÊM quyền, false = CHẶN quyền (Revoke)
+  grantedBy    String?  // ID của Admin đã cấp quyền này (phục vụ audit)
+  createdAt    DateTime @default(now())
+
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@index([permissionId])
+  @@map("user_permissions")
+}
+```
+
+> **⚡ Thuật toán tính quyền thực tế (Effective Permissions):**  
+> $$\text{Quyền thực tế} = (\text{Tổng Permissions từ các Roles}) + (\text{Quyền cấp thêm}) - (\text{Quyền bị chặn})$$
+
+```typescript
+export async function getUserEffectivePermissions(userId: string): Promise<string[]> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      userRoles: {
+        include: {
+          role: {
+            include: {
+              permissions: { include: { permission: true } }
+            }
+          }
+        }
+      },
+      userPermissions: {
+        include: { permission: true }
+      }
+    }
+  });
+
+  if (!user) return [];
+
+  // 1. Gộp toàn bộ quyền từ các Roles
+  const permissions = new Set<string>();
+  user.userRoles.forEach((ur) => {
+    ur.role.permissions.forEach((rp) => {
+      permissions.add(rp.permission.key);
+    });
+  });
+
+  // 2. Áp dụng quyền cấp thêm (isGranted: true) hoặc tước bỏ (isGranted: false)
+  user.userPermissions.forEach((up) => {
+    if (up.isGranted) {
+      permissions.add(up.permission.key);
+    } else {
+      permissions.delete(up.permission.key);
+    }
+  });
+
+  return Array.from(permissions);
+}
+```
+
+#### 4. Tối Ưu Hiệu Năng Với Redis Cache
+- Cache danh sách `permissions` của từng `roleKey` hoặc `userId` vào Redis với TTL ngắn (5 - 15 phút).
+- Khi Admin cập nhật quyền của Role hoặc User -> Xóa cache (Cache Invalidation) để quyền mới có hiệu lực ngay lập tức mà không cần chờ token hết hạn.
 
 ---
 
