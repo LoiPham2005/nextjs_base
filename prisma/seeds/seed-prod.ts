@@ -38,25 +38,32 @@ export async function seedProd(prisma: PrismaClient) {
 
   const hashedPassword = await CryptoUtils.hashPassword(adminPassword);
 
-  const adminRole = await prisma.role.findUniqueOrThrow({
-    where: { key: SYSTEM_ROLES.ADMIN },
+  const superAdminRole = await prisma.role.findUniqueOrThrow({
+    where: { key: SYSTEM_ROLES.SUPER_ADMIN },
     select: { id: true },
   });
 
   const admin = await prisma.user.upsert({
     where: { email: email.toLowerCase() },
-    // Không ghi đè mật khẩu của admin đã tồn tại: seed phải chạy lại được
-    // nhiều lần mà không reset thông tin đăng nhập đang dùng.
     update: {},
     create: {
       email: email.toLowerCase(),
-      username: "admin",
-      fullName: "System Super Admin",
+      username: "superadmin",
       password: hashedPassword,
-      roleId: adminRole.id,
+      roleId: superAdminRole.id,
+      profile: {
+        create: {
+          fullName: "System Super Admin",
+        },
+      },
+      userRoles: {
+        create: {
+          roleId: superAdminRole.id,
+        },
+      },
     },
     select: { email: true, role: { select: { key: true } } },
   });
 
-  console.log(`✅ [PROD SEED] Admin sẵn sàng: ${admin.email} (vai trò: ${admin.role.key})`);
+  console.log(`✅ [PROD SEED] Super Admin sẵn sàng: ${admin.email} (vai trò: ${admin.role.key})`);
 }

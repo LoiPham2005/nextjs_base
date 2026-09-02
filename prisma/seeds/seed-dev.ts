@@ -35,6 +35,18 @@ export async function seedDev(prisma: PrismaClient) {
       roleKey: SYSTEM_ROLES.USER,
     },
     {
+      email: "manager@example.com",
+      username: "manager",
+      fullName: "Trần Quản Lý",
+      roleKey: SYSTEM_ROLES.MANAGER,
+    },
+    {
+      email: "staff@example.com",
+      username: "staff",
+      fullName: "Lê Nhân Viên",
+      roleKey: SYSTEM_ROLES.STAFF,
+    },
+    {
       email: "dev.admin@example.com",
       username: "devadmin",
       fullName: "Dev Manager",
@@ -62,13 +74,22 @@ export async function seedDev(prisma: PrismaClient) {
       create: {
         email: user.email,
         username: user.username,
-        fullName: user.fullName,
         password,
         roleId,
+        profile: {
+          create: {
+            fullName: user.fullName,
+          },
+        },
+        userRoles: {
+          create: {
+            roleId,
+          },
+        },
       },
-      select: { email: true, fullName: true },
+      select: { email: true, profile: { select: { fullName: true } } },
     });
-    console.log(` └─ ${created.email} (${created.fullName ?? "—"})`);
+    console.log(` └─ ${created.email} (${created.profile?.fullName ?? "—"})`);
   }
 
   console.log(`✅ [DEV SEED] Xong ${mockUsers.length} user mẫu. Mật khẩu: ${DEV_PASSWORD}`);

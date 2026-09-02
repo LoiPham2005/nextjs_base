@@ -35,43 +35,46 @@
  * database. Không cần viết migration.
  */
 export const PERMISSIONS = [
+  // Quản lý người dùng
   "user:read",
   "user:create",
   "user:update",
   "user:delete",
+
+  // Hồ sơ cá nhân
   "profile:read:own",
   "profile:update:own",
 
-  /*
-   * Quản trị vai trò và phân quyền.
-   *
-   * Tách `role:read` khỏi `role:update` vì hai việc rất khác nhau về mức nguy
-   * hiểm: xem ai đang có quyền gì là thao tác thường ngày, còn sửa bảng phân
-   * quyền là thao tác tự nâng quyền được — ai sửa được `role_permissions` thì
-   * tự cấp cho mình mọi quyền còn lại chỉ bằng vài cú tick.
-   */
+  // Quản trị vai trò & phân quyền
   "role:read",
   "role:create",
   "role:update",
   "role:delete",
+
+  // Nhật ký kiểm toán & Hệ thống
+  "audit:read",
+  
+  // Thông báo & Chiến dịch
+  "notification:read",
+  "notification:send",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
-/** Khoá vai trò hệ thống — hai vai trò này luôn tồn tại và không xoá được. */
+/** Khoá vai trò hệ thống — các vai trò cốt lõi được định nghĩa sẵn. */
 export const SYSTEM_ROLES = {
-  USER: "USER",
-  ADMIN: "ADMIN",
+  SUPER_ADMIN: "SUPER_ADMIN", // Quản trị tối cao
+  ADMIN: "ADMIN",             // Quản trị viên
+  MANAGER: "MANAGER",         // Chủ sân / Quản lý chi nhánh
+  STAFF: "STAFF",             // Nhân viên sân / Lễ tân
+  CUSTOMER: "CUSTOMER",       // Khách hàng đặt sân
+  USER: "USER",               // Người dùng thông thường
 } as const;
 
 export type SystemRoleKey = (typeof SYSTEM_ROLES)[keyof typeof SYSTEM_ROLES];
 
 /**
  * Khoá vai trò, dạng chuỗi tự do.
- *
- * Cố ý KHÔNG phải union type: khách hàng tạo được vai trò mới lúc chạy, nên
- * TypeScript không thể biết trước danh sách. Đây chính là cái giá của việc đưa
- * vai trò xuống database — đổi lại là không phải deploy mỗi lần thêm vai trò.
  */
 export type RoleKey = string;
 
@@ -85,20 +88,18 @@ export type RoleSeed = {
 /**
  * Dữ liệu nền cho `pnpm db:seed`.
  *
- * Seed chỉ THÊM phần còn thiếu, không ghi đè phần đã có — nếu không, mỗi lần
- * deploy sẽ xoá sạch những điều chỉnh mà quản trị viên đã làm trên giao diện.
+ * Định nghĩa sẵn 5 vai trò chuẩn mực phổ biến:
+ * 1. SUPER_ADMIN: Toàn quyền tối cao hệ thống.
+ * 2. ADMIN: Quản trị viên điều hành (quản lý user, role, notification, audit).
+ * 3. MANAGER: Quản lý chi nhánh / Trưởng phòng (xem user, gửi thông báo, xem audit).
+ * 4. STAFF: Nhân viên vận hành / CSKH (xem & hỗ trợ user, xem thông báo).
+ * 5. USER: Người dùng / Khách hàng thông thường (chỉ quản lý dữ liệu của chính mình).
  */
 export const DEFAULT_ROLE_PERMISSIONS: readonly RoleSeed[] = [
   {
-    key: SYSTEM_ROLES.USER,
-    name: "Người dùng",
-    description: "Chỉ thao tác trên dữ liệu của chính mình",
-    permissions: ["profile:read:own", "profile:update:own"],
-  },
-  {
-    key: SYSTEM_ROLES.ADMIN,
-    name: "Quản trị viên",
-    description: "Toàn quyền quản lý người dùng và phân quyền",
+    key: SYSTEM_ROLES.SUPER_ADMIN,
+    name: "Quản trị cấp cao (Super Admin)",
+    description: "Toàn quyền tối cao mọi chức năng hệ thống",
     permissions: [
       "user:read",
       "user:create",
@@ -110,31 +111,147 @@ export const DEFAULT_ROLE_PERMISSIONS: readonly RoleSeed[] = [
       "role:create",
       "role:update",
       "role:delete",
+      "audit:read",
+      "notification:read",
+      "notification:send",
+    ],
+  },
+  {
+    key: SYSTEM_ROLES.ADMIN,
+    name: "Quản trị viên (Admin)",
+    description: "Quản lý người dùng, phân quyền và gửi thông báo",
+    permissions: [
+      "user:read",
+      "user:create",
+      "user:update",
+      "profile:read:own",
+      "profile:update:own",
+      "role:read",
+      "role:create",
+      "role:update",
+      "audit:read",
+      "notification:read",
+      "notification:send",
+    ],
+  },
+  {
+    key: SYSTEM_ROLES.MANAGER,
+    name: "Quản lý (Manager)",
+    description: "Quản lý hoạt động nhân sự và gửi thông báo nội bộ",
+    permissions: [
+      "user:read",
+      "profile:read:own",
+      "profile:update:own",
+      "role:read",
+      "audit:read",
+      "notification:read",
+      "notification:send",
+    ],
+  },
+  {
+    key: SYSTEM_ROLES.STAFF,
+    name: "Nhân viên (Staff)",
+    description: "Nhân viên vận hành, xem thông tin người dùng và nhận thông báo",
+    permissions: [
+      "user:read",
+      "profile:read:own",
+      "profile:update:own",
+      "notification:read",
+    ],
+  },
+  {
+    key: SYSTEM_ROLES.USER,
+    name: "Người dùng (User / Customer)",
+    description: "Người dùng thông thường, chỉ thao tác trên dữ liệu của chính mình",
+    permissions: [
+      "profile:read:own",
+      "profile:update:own",
+      "notification:read",
     ],
   },
 ];
 
-/** Mô tả hiển thị cho từng quyền trên giao diện phân quyền. */
-export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
-  "user:read": "Xem danh sách và chi tiết người dùng",
-  "user:create": "Tạo người dùng mới",
-  "user:update": "Sửa thông tin người dùng",
-  "user:delete": "Xoá người dùng",
-  "profile:read:own": "Xem hồ sơ của chính mình",
-  "profile:update:own": "Sửa hồ sơ của chính mình",
-  "role:read": "Xem danh sách vai trò và bảng phân quyền",
-  "role:create": "Tạo vai trò mới",
-  "role:update": "Đổi tên vai trò và gán/gỡ quyền",
-  "role:delete": "Xoá vai trò",
+/** Metadata chi tiết (Tên hiển thị, Nhóm phân loại, Mô tả) của từng quyền */
+export const PERMISSION_METADATA: Record<
+  Permission,
+  { name: string; category: string; description: string }
+> = {
+  "user:read": {
+    name: "Xem người dùng",
+    category: "Quản lý Người dùng",
+    description: "Xem danh sách và chi tiết người dùng",
+  },
+  "user:create": {
+    name: "Tạo người dùng",
+    category: "Quản lý Người dùng",
+    description: "Tạo người dùng mới trong hệ thống",
+  },
+  "user:update": {
+    name: "Sửa người dùng",
+    category: "Quản lý Người dùng",
+    description: "Sửa thông tin và trạng thái người dùng",
+  },
+  "user:delete": {
+    name: "Xoá người dùng",
+    category: "Quản lý Người dùng",
+    description: "Xoá tài khoản người dùng khỏi hệ thống",
+  },
+  "profile:read:own": {
+    name: "Xem hồ sơ cá nhân",
+    category: "Hồ sơ Cá nhân",
+    description: "Xem hồ sơ của chính mình",
+  },
+  "profile:update:own": {
+    name: "Sửa hồ sơ cá nhân",
+    category: "Hồ sơ Cá nhân",
+    description: "Sửa hồ sơ của chính mình",
+  },
+  "role:read": {
+    name: "Xem vai trò & quyền",
+    category: "Phân quyền (RBAC)",
+    description: "Xem danh sách vai trò và bảng phân quyền",
+  },
+  "role:create": {
+    name: "Tạo vai trò",
+    category: "Phân quyền (RBAC)",
+    description: "Tạo vai trò mới trong hệ thống",
+  },
+  "role:update": {
+    name: "Sửa vai trò",
+    category: "Phân quyền (RBAC)",
+    description: "Đổi tên vai trò và gán/gỡ quyền",
+  },
+  "role:delete": {
+    name: "Xoá vai trò",
+    category: "Phân quyền (RBAC)",
+    description: "Xoá vai trò khỏi hệ thống",
+  },
+  "audit:read": {
+    name: "Xem nhật ký kiểm toán",
+    category: "Hệ thống & Bảo mật",
+    description: "Xem nhật ký kiểm toán hành động hệ thống",
+  },
+  "notification:read": {
+    name: "Xem thông báo",
+    category: "Thông báo & Tin nhắn",
+    description: "Xem danh sách thông báo và hộp thư",
+  },
+  "notification:send": {
+    name: "Gửi thông báo",
+    category: "Thông báo & Tin nhắn",
+    description: "Tạo và gửi thông báo (Push FCM & In-App)",
+  },
 };
+
+/** Mô tả hiển thị cho từng quyền trên giao diện phân quyền. */
+export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = Object.fromEntries(
+  Object.entries(PERMISSION_METADATA).map(([k, v]) => [k, v.description])
+) as Record<Permission, string>;
 
 const PERMISSION_SET: ReadonlySet<string> = new Set(PERMISSIONS);
 
 /**
  * Kiểm tra một chuỗi bất kỳ có phải quyền hợp lệ không.
- *
- * Cần vì quyền đọc lên từ database là `string`. Bản ghi còn sót lại sau khi
- * một quyền bị xoá khỏi code phải bị bỏ qua, chứ không được coi là hợp lệ.
  */
 export function isKnownPermission(value: string): value is Permission {
   return PERMISSION_SET.has(value);

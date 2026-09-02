@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import {
   DEFAULT_ROLE_PERMISSIONS,
   PERMISSIONS,
-  PERMISSION_DESCRIPTIONS,
+  PERMISSION_METADATA,
 } from "../../src/lib/permissions";
 
 /**
@@ -24,12 +24,20 @@ import {
 export async function seedRbac(prisma: PrismaClient) {
   // 1. Danh mục quyền. Nguồn sự thật là hằng PERMISSIONS trong code.
   for (const key of PERMISSIONS) {
+    const meta = PERMISSION_METADATA[key];
     await prisma.permission.upsert({
       where: { key },
-      // Mô tả thì cập nhật được: nó chỉ là chữ hiển thị, sửa lại không đổi
-      // hành vi của hệ thống.
-      update: { description: PERMISSION_DESCRIPTIONS[key] },
-      create: { key, description: PERMISSION_DESCRIPTIONS[key] },
+      update: {
+        name: meta.name,
+        category: meta.category,
+        description: meta.description,
+      },
+      create: {
+        key,
+        name: meta.name,
+        category: meta.category,
+        description: meta.description,
+      },
     });
   }
 

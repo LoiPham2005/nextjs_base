@@ -32,7 +32,7 @@ erDiagram
 
     Role {
         string id PK
-        string key UK "ADMIN | USER | MODERATOR"
+        string key UK "SUPER_ADMIN | ADMIN | MANAGER | STAFF | CUSTOMER | USER"
         string name
         boolean isSystem "Không cho phép xóa nếu true"
     }
@@ -128,15 +128,19 @@ sequenceDiagram
 ## 📋 3. Lộ Trình Triển Khai & Phát Triển (Development Roadmap)
 
 ### Giai Đoạn 1: Seeding Dữ Liệu & Khởi Tạo Phân Quyền Cơ Bản
-- [ ] **Tạo Permissions chuẩn theo chuẩn `resource:action`**:
-  - Quản lý người dùng: `user:read`, `user:create`, `user:update`, `user:delete`, `user:ban`
+- [x] **Tạo Permissions chuẩn theo định dạng `resource:action` (kèm `category` và `name`)**:
+  - Quản lý người dùng: `user:read`, `user:create`, `user:update`, `user:delete`
+  - Hồ sơ cá nhân: `profile:read:own`, `profile:update:own`
   - Quản lý vai trò & quyền: `role:read`, `role:create`, `role:update`, `role:delete`
   - Nhật ký hệ thống: `audit:read`
-- [ ] **Tạo Roles mặc định (`isSystem: true`)**:
-  - `SUPER_ADMIN`: Toàn quyền tất cả permissions.
-  - `ADMIN`: Quản lý người dùng và nghiệp vụ thông thường.
-  - `USER`: Quyền cơ bản (đọc thông tin của chính mình, cập nhật profile).
-- [ ] Viết file `prisma/seed.ts` để tự động khởi tạo khi setup dự án.
+  - Thông báo & Chiến dịch: `notification:read`, `notification:send`
+- [x] **Tạo 5 Roles mặc định chuẩn mực (`isSystem: true`)**:
+  - `SUPER_ADMIN` (Quản trị cấp cao): Toàn quyền tối cao mọi chức năng hệ thống.
+  - `ADMIN` (Quản trị viên): Quản lý người dùng, phân quyền, gửi thông báo và xem audit log.
+  - `MANAGER` (Quản lý chi nhánh / Trưởng phòng): Quản lý nhân sự, gửi thông báo nội bộ.
+  - `STAFF` (Nhân viên CSKH / Vận hành): Xem thông tin người dùng, hỗ trợ khách hàng, xem thông báo.
+  - `USER` (Khách hàng / Người dùng thông thường): Thao tác trên hồ sơ của chính mình (`:own`) và xem thông báo.
+- [x] Đã cấu hình hoàn chỉnh bộ file `prisma/seeds/` (`seed-rbac.ts`, `seed-prod.ts`, `seed-dev.ts`).
 
 ---
 
