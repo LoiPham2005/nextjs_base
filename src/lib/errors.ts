@@ -2,14 +2,14 @@
  * Lỗi NGHIỆP VỤ, khai báo tập trung.
  *
  * ---
- * VÌ SAO KHÔNG NÉM THẲNG HttpException CỦA NESTJS
+ * VÌ SAO KHÔNG GẮN MÃ HTTP NGAY TẠI CHỖ NÉM
  *
- * `packages/core` không được biết gì về HTTP. Cùng một `UserNotFoundError` có
- * thể tới từ REST API (→ 404), từ một job nền (→ ghi log rồi bỏ qua), hoặc từ
- * script CLI (→ in ra rồi thoát). Gắn mã HTTP ngay tại chỗ ném lỗi là ép cả ba
- * nơi phải hiểu theo cách của cái đầu tiên.
+ * Tầng service không được biết gì về HTTP. Cùng một `UserNotFoundError` có thể
+ * tới từ REST API (→ 404), từ một Server Action (→ hiện lỗi trên form), từ một
+ * job nền (→ ghi log rồi bỏ qua), hoặc từ script CLI (→ in ra rồi thoát). Gắn
+ * mã HTTP ngay tại chỗ ném là ép cả bốn nơi phải hiểu theo cách của nơi đầu.
  *
- * Việc ánh xạ sang HTTP nằm gọn trong `apps/api/src/common/filters/`.
+ * Việc ánh xạ sang HTTP nằm gọn trong `DOMAIN_STATUS` (`src/lib/api/response.ts`).
  *
  * ---
  * VÌ SAO CÓ `code`

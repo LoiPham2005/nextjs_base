@@ -72,25 +72,38 @@ gõ sai tên); việc GÁN quyền cho vai trò nằm trong database (`roles`/`p
 README mô tả kiến trúc nền tảng chính xác, nhưng các phần sau được thêm sau và **chưa được cập
 nhật vào README**:
 
-- **`User` có thêm**: `status` (`ACTIVE`/`BANNED`, khoá thủ công bởi admin — khác `lockedUntil`),
-  `failedLoginAttempts` + `lockedUntil` (khoá tạm tự động sau N lần sai mật khẩu liên tiếp, xem
-  `AuthService.validateCredentials`/`registerFailedAttempt` trong `src/services/auth.service.ts`),
-  `deletedAt` (xoá mềm — `userService.delete()` không hard-delete nữa, xem
-  [docs/GOTCHAS.md](docs/GOTCHAS.md#7-xoá-mềm-deletedat--cột-email-là-unique--không-thể-để-trống-khi-xoá)).
+- **`User` có thêm**: `status` (`ACTIVE`/`INACTIVE`/`BANNED`, khoá thủ công bởi admin — khác
+  `lockedUntil`), `failedLoginAttempts` + `lockedUntil` (khoá tạm tự động sau N lần sai mật khẩu
+  liên tiếp, xem `AuthService.validateCredentials`/`registerFailedAttempt` trong
+  `src/services/auth.service.ts`), `deletedAt` (xoá mềm — **`userService.softDelete()`**, không
+  phải `delete()`), `passwordChangedAt` (thu hồi TỨC THÌ mọi access token đã phát trước đó, so với
+  `iat` của JWT), `pendingEmail` (đổi email hai bước), `twoFactorSecret`/`twoFactorEnabledAt`.
+- **Mật khẩu băm bằng Argon2id** (`@node-rs/argon2`), KHÔNG phải bcrypt. bcryptjs đã bị gỡ hẳn.
+  Mã ngắn (OTP, mã khôi phục) băm bằng `hashScopedToken(scope, token)` — SHA-256 có tiền tố phạm
+  vi, ngăn mã của luồng này dùng được ở luồng kia.
+- **Một người mang NHIỀU vai trò** (`userRoles`), không phải một. Quyền = hợp(mọi vai trò) + cấp
+  thêm riêng − tước riêng; **cấm luôn thắng**. `roleKey` (số ít) đã thành `roleKeys` (mảng) ở mọi
+  schema và endpoint.
+- **`Role.level`** — bậc quyền lực, chặn leo thang đặc quyền: `assertCanActOn` từ chối khi mục
+  tiêu có `level` ≥ `level` của người thao tác. Không có nó thì một ADMIN sửa/xoá được SUPER_ADMIN.
+- **Ngoại lệ quyền theo TỪNG người** (`UserPermission`, có `expiresAt`): "hai tài khoản cùng vai
+  trò nhưng admin cho một người thêm quyền" giải bằng một dòng ngoại lệ, không phải bằng một vai
+  trò mới cho một người. API: `GET/PUT /api/v1/users/[id]/permissions`,
+  `DELETE .../permissions/[permissionKey]`.
 - **Đăng nhập OAuth** (Google/Github/Facebook/Apple) — tự viết bằng `fetch`/`jose`
   (`src/lib/oauth/*`, `src/services/oauth.service.ts`), **không dùng thư viện `arctic`** (đã bị
   tác giả deprecate, xem GOTCHAS #5). Route: `/api/auth/oauth/[provider]/{start,callback}`.
 - **API mới**: `PATCH /api/v1/users/[id]/status` (khoá/mở khoá), `POST /api/v1/users/[id]/unlock`
   (mở khoá sớm) — cả hai cần quyền `user:update`. Thêm `PATCH /api/v1/users/[id]` (sửa hồ sơ):
-  chính mình cần `profile:update:own`, người khác cần `user:update`, **riêng `roleKey` luôn đòi
+  chính mình cần `profile:update:own`, người khác cần `user:update`, **riêng `roleKeys` luôn đòi
   `user:update`** kể cả khi sửa chính mình — nếu không thì mọi user tự phong ADMIN được bằng một
   field trong body.
 - **Quản trị vai trò** (`roleService`, `/roles`, `/api/v1/roles*`): ba bảng RBAC giờ có đường ghi
   từ ứng dụng, trước đây chỉ sửa được bằng SQL tay. Bốn quyền mới: `role:read/create/update/delete`
   — nhớ `pnpm db:seed` sau khi pull để đồng bộ danh mục quyền xuống database. Mọi đường ghi phân
   quyền BẮT BUỘC gọi `permissionService.invalidate()`.
-- **Trang cho luồng email**: `/forgot-password`, `/reset-password`, `/verify-email` (trong
-  `(auth)/`). Link trong email trỏ tới đây; trước đó chỉ có REST API nên bấm link là 404.
+- **Trang cho luồng email**: `/forgot-password`, `/reset-password`, `/verify-email`,
+  `/confirm-email-change` (trong `(auth)/`). Link trong email trỏ tới đây; trước đó chỉ có REST API nên bấm link là 404.
   `/verify-email` cố ý xác thực khi BẤM NÚT chứ không khi mở trang — bộ quét link của Gmail sẽ
   đốt mất token dùng-một-lần trước khi người dùng kịp bấm.
 - **Rate limit có store cắm được** (`src/lib/rate-limit.ts`): `REDIS_URL` → Redis, không có →
@@ -192,9 +205,47 @@ Vài điểm dễ sai:
   `id` đến từ URL nên người gọi tự đặt được. Trả 404 cho cả "không tồn tại" lẫn "của người khác".
   `TokenPair` giờ có thêm `sessionId` để client tự nhận ra phiên của mình; nó **đổi sau mỗi lần
   refresh** vì refresh token xoay vòng.
-- **`/users` phân trang kiểu cursor**, không phải offset: danh sách đang được sửa liên tục nên
-  offset lệch ngay khi có dòng chèn vào giữa. Không có nút "Trang trước" — mỗi trang là một URL
-  riêng nên nút Back của trình duyệt làm đúng việc đó.
+- **`/users` phân trang theo SỐ TRANG** (`page`/`limit`), không phải cursor: màn quản trị cần nhảy
+  tới "trang 7" và cần biết TỔNG số bản ghi — cursor không cho cả hai. `userService.list()` trả
+  `{ items, meta }` trong MỘT lần gọi, nên không có chuyện đếm và lấy trang nhìn thấy hai trạng
+  thái khác nhau của bảng.
+
+## Xác thực hai lớp, passkey, và các endpoint mới
+
+- **2FA (TOTP)**: `src/services/two-factor.service.ts`. Bật là BA bước —
+  `POST /auth/2fa/setup` (sinh QR, CHƯA bật) → người dùng quét → `POST /auth/2fa/enable` (mã đúng
+  mới bật, trả mã khôi phục). Bước cuối chứng minh app xác thực đã lưu đúng bí mật; bật ngay từ
+  bước 1 thì người quét hỏng bị khoá vĩnh viễn khỏi tài khoản của chính mình.
+  Bí mật TOTP **mã hoá AES-256-GCM** bằng `ENCRYPTION_KEY` — thiếu khoá thì giao diện tự ẩn nút.
+- **Passkey/WebAuthn**: `src/services/webauthn.service.ts` + `@simplewebauthn/*` v14. Đăng nhập
+  bằng passkey **KHÔNG hỏi thêm 2FA** dù tài khoản có bật: `userVerification: "required"` đã là
+  hai yếu tố, hỏi thêm chỉ đẩy người dùng quay về mật khẩu.
+- **Vé (`src/lib/tickets.ts`)** — JWT ngắn hạn KHÔNG phải phiên: `2fa`, `webauthn_reg`,
+  `webauthn_auth`. Cả bốn loại token ký bằng cùng `SESSION_SECRET`, nên chữ ký đúng không chứng
+  minh được token dùng vào việc gì. `verifySession()` chỉ nhận `typ: "access"`, `verifyTicket()`
+  chỉ nhận đúng loại vé được hỏi. Thiếu phép kiểm đó là 2FA bị bỏ qua sạch.
+- **Trang `/security`** — người dùng tự bật/tắt 2FA, quản lý passkey. QR **vẽ trong trình duyệt**
+  bằng `qrcode`, không gọi dịch vụ sinh QR nào: chuỗi `otpauth://` chứa chính bí mật TOTP.
+- **`POST /auth/login` có HAI hình dạng response**: token, hoặc `{ twoFactorRequired, challengeToken }`.
+  Khác hẳn nhau có chủ đích để client buộc phải rẽ nhánh tường minh.
+- **Nhóm endpoint mới**: `/auth/2fa/*`, `/auth/passkeys/*`, `/auth/change-email[/confirm]`,
+  `/auth/phone/{request-otp,verify}`, `DELETE /auth/sessions` (đăng xuất mọi thiết bị khác),
+  `/auth/oauth/{providers,linked}` + `DELETE /auth/oauth/[provider]`, `/notifications/*`,
+  `/devices`, `/audit-logs`, `/permissions`, `/files`, `/users/[id]/{roles,permissions}`.
+- **`PHONE_OTP` dựng sẵn nhưng MẶC ĐỊNH TẮT** (`PHONE_VERIFICATION_ENABLED=0`). Khác email, mỗi
+  SMS tốn tiền thật — bật là một quyết định có chi phí. Ba mức chặn độc lập: hạn mã, chờ giữa hai
+  lần gửi, trần mỗi số mỗi ngày.
+
+## OpenAPI: dùng `z.toJSONSchema()` của Zod 4, KHÔNG dùng zod-to-openapi
+
+`src/lib/openapi/registry.ts` tự dựng tài liệu bằng API có sẵn của Zod 4. Đừng thêm lại
+`@asteasolutions/zod-to-openapi`: thư viện đó vá `.openapi()` vào `ZodType.prototype` bằng một
+module chỉ có side effect và đòi module ấy chạy TRƯỚC mọi schema — điều kiện Turbopack không giữ
+khi gom bundle production. Hậu quả: `next dev` và `vitest` chạy đúng, `next build` đổ với
+`t.openapi is not a function`, tức là chỉ hỏng ở bước cuối trước khi deploy.
+
+`registry.test.ts` so khớp HAI CHIỀU giữa `src/app/api/v1/**/route.ts` và `document.paths` — thêm
+endpoint mà quên khai báo là đỏ ngay, thay vì lộ ra ở SDK sinh tự động nhiều ngày sau.
 
 ## Tài liệu khác trong `docs/`
 

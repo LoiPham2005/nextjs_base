@@ -36,7 +36,7 @@ describe("TokenService", () => {
     const db = createDb();
     const issued = await new TokenService(db).issue("u1");
 
-    const written = vi.mocked(db.refreshToken.create).mock.calls[0]![0]!.data;
+    const written = vi.mocked(db.refreshToken.create).mock.calls[0]![0].data;
 
     expect(written.tokenHash).toBe(hashOpaqueToken(issued.token));
     expect(JSON.stringify(written)).not.toContain(issued.token);
@@ -87,7 +87,7 @@ describe("TokenService", () => {
     const result = await new TokenService(db).rotate("token-cu");
 
     expect(result?.refresh.familyId).toBe("fam-1");
-    const created = vi.mocked(db.refreshToken.create).mock.calls[0]![0]!.data as {
+    const created = vi.mocked(db.refreshToken.create).mock.calls[0]![0].data as {
       familyId: string;
     };
     expect(created.familyId).toBe("fam-1");
@@ -102,7 +102,7 @@ describe("TokenService", () => {
 
     await new TokenService(db).rotate("token-cu");
 
-    const created = vi.mocked(db.refreshToken.create).mock.calls[0]![0]!.data as {
+    const created = vi.mocked(db.refreshToken.create).mock.calls[0]![0].data as {
       twoFactorAt: Date;
     };
     expect(created.twoFactorAt).toEqual(twoFactorAt);

@@ -11,7 +11,7 @@ vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(cookieStore) }))
 
 vi.mock("@/services/user.service", async (importOriginal) => {
   const actual = await importOriginal<typeof UserServiceModule>();
-  return { ...actual, userService: { list: vi.fn(), count: vi.fn(), create: vi.fn() } };
+  return { ...actual, userService: { list: vi.fn(), create: vi.fn() } };
 });
 
 /**
@@ -24,18 +24,29 @@ vi.mock("@/services/permission.service", () => ({
   permissionService: { can: vi.fn(), canActOnResource: vi.fn() },
 }));
 
-import { signSession } from "@/lib/session";
+import { buildPaginationMeta, type Paginated } from "@/schemas/common.schema";
+import { signSession, type SessionPayload } from "@/lib/session";
 import { userService } from "@/services/user.service";
 import { permissionService } from "@/services/permission.service";
 import { GET, POST } from "./route";
 
-const admin = { sub: "admin-1", email: "admin@example.com", role: "ADMIN" as const };
-const user = { sub: "user-1", email: "user@example.com", role: "USER" as const };
+const admin: SessionPayload = {
+  typ: "access",
+  sub: "admin-1",
+  email: "admin@example.com",
+  roles: ["ADMIN"],
+};
+const user: SessionPayload = {
+  typ: "access",
+  sub: "user-1",
+  email: "user@example.com",
+  roles: ["USER"],
+};
 
 type ErrorBody = { error: { code: string } };
-type ListBody = {
-  data: { users: unknown[]; pagination: { perPage: number; nextCursor: string | null } };
-};
+type ListBody = { data: { items: unknown[]; meta: Paginated<never>["meta"] } };
+
+const EMPTY_PAGE = { items: [], meta: buildPaginationMeta(0, { page: 1, limit: 20 }) };
 
 async function get(token?: string, query = "") {
   return GET(
@@ -48,11 +59,11 @@ async function get(token?: string, query = "") {
 beforeEach(() => {
   vi.clearAllMocks();
   cookieStore.get.mockReturnValue(undefined);
-  vi.mocked(userService.list).mockResolvedValue({ users: [], nextCursor: null });
-  vi.mocked(userService.count).mockResolvedValue(0);
-  // Mặc định: ADMIN có quyền, USER thì không.
-  vi.mocked(permissionService.can).mockImplementation((roleKey) =>
-    Promise.resolve(roleKey === "ADMIN"),
+  vi.mocked(userService.list).mockResolvedValue(EMPTY_PAGE);
+  // Mặc định: ADMIN có quyền, USER thì không. `can` nhận userId chứ không nhận
+  // vai trò nữa — vai trò đã xuống database, route không còn nhìn thấy nó.
+  vi.mocked(permissionService.can).mockImplementation((userId) =>
+    Promise.resolve(userId === admin.sub),
   );
 });
 
@@ -72,19 +83,30 @@ describe("GET /api/v1/users", () => {
     expect(userService.list).not.toHaveBeenCalled();
   });
 
-  it("200 kèm phân trang kiểu cursor khi là ADMIN", async () => {
-    vi.mocked(userService.list).mockResolvedValue({ users: [], nextCursor: "u-99" });
+  it("200 kèm meta phân trang khi là ADMIN", async () => {
+    vi.mocked(userService.list).mockResolvedValue({
+      items: [],
+      meta: buildPaginationMeta(45, { page: 2, limit: 20 }),
+    });
 
-    const response = await get(await signSession(admin), "?cursor=u-1&perPage=20");
+    const response = await get(await signSession(admin), "?page=2&limit=20");
     const body = (await response.json()) as ListBody;
 
     expect(response.status).toBe(200);
-    expect(body.data.pagination).toEqual({ perPage: 20, nextCursor: "u-99" });
-    expect(vi.mocked(userService.list).mock.calls[0]?.[0]).toEqual({ cursor: "u-1", take: 20 });
+    // `total` và `totalPages` đi kèm ngay trong lần gọi này, không phải một
+    // truy vấn count riêng — hai truy vấn có thể thấy hai trạng thái khác nhau.
+    expect(body.data.meta).toEqual({
+      page: 2,
+      limit: 20,
+      total: 45,
+      totalPages: 3,
+      hasNext: true,
+    });
+    expect(vi.mocked(userService.list).mock.calls[0]?.[0]).toMatchObject({ page: 2, limit: 20 });
   });
 
-  it("chặn perPage vượt trần thay vì cho kéo cả bảng", async () => {
-    const response = await get(await signSession(admin), "?perPage=100000");
+  it("chặn limit vượt trần thay vì cho kéo cả bảng", async () => {
+    const response = await get(await signSession(admin), "?limit=100000");
 
     expect(response.status).toBe(422);
     expect(userService.list).not.toHaveBeenCalled();
@@ -126,27 +148,31 @@ describe("POST /api/v1/users", () => {
     expect(userService.create).not.toHaveBeenCalled();
   });
 
-  it("201 khi ADMIN tạo user hợp lệ, và ADMIN được phép chỉ định role", async () => {
+  it("201 khi ADMIN tạo user hợp lệ, và ADMIN được phép chỉ định vai trò", async () => {
     vi.mocked(userService.create).mockResolvedValue({
       id: "u-2",
       email: "new@example.com",
+      phone: null,
       username: "u",
       fullName: null,
-      roleName: "Người dùng",
-      emailVerifiedAt: null,
+      avatarUrl: null,
       status: "ACTIVE",
+      emailVerifiedAt: null,
       lockedUntil: null,
-      roles: "ADMIN",
+      twoFactorEnabled: false,
+      roles: ["ADMIN"],
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
     const response = await post(await signSession(admin), {
       email: "new@example.com",
-      roleKey: "ADMIN",
+      roleKeys: ["ADMIN"],
     });
 
     expect(response.status).toBe(201);
-    expect(vi.mocked(userService.create).mock.calls[0]?.[0].roleKeys).toBe("ADMIN");
+    // Khác hẳn form trên web: ở đó `roleKeys` bị bỏ qua hoàn toàn vì bất kỳ ai
+    // cũng gửi được field ẩn. Ở đây người gọi đã qua `user:create`.
+    expect(vi.mocked(userService.create).mock.calls[0]?.[0].roleKeys).toEqual(["ADMIN"]);
   });
 });

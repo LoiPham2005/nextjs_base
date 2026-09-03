@@ -24,8 +24,8 @@ export async function Header() {
   // người dùng bấm vào thứ trông như dùng được rồi nhận trang không tìm thấy.
   const [canSeeUsers, canSeeRoles] = user
     ? await Promise.all([
-        permissionService.can(user.roles.join(', '), "user:read"),
-        permissionService.can(user.roles.join(', '), "role:read"),
+        permissionService.can(user.roles.join(", "), "user:read"),
+        permissionService.can(user.roles.join(", "), "role:read"),
       ])
     : [false, false];
 

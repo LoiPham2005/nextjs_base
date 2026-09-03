@@ -1,8 +1,9 @@
 "use client";
 
 import { useActionState } from "react";
-import { loginAction, type AuthFormState } from "../actions";
+import { loginAction, verifyTwoFactorAction, type AuthFormState } from "../actions";
 import { AuthFields, FORM_STYLE, type Field } from "../auth-form";
+import { TwoFactorForm } from "./two-factor-form";
 
 const initialState: AuthFormState = {};
 
@@ -26,6 +27,23 @@ const FIELDS: Field[] = [
 
 export function LoginForm({ nextPath }: { nextPath?: string }) {
   const [state, formAction, isPending] = useActionState(loginAction, initialState);
+
+  /*
+   * Hai form RIÊNG BIỆT, không phải một form đổi trường.
+   *
+   * `useActionState` gắn liền với MỘT action. Nhét cả hai bước vào một form
+   * buộc action đăng nhập phải tự đoán mình đang ở bước nào theo dữ liệu gửi
+   * lên — và đoán sai một lần là bỏ qua luôn lớp thứ hai.
+   */
+  if (state.twoFactorToken) {
+    return (
+      <TwoFactorForm
+        challengeToken={state.twoFactorToken}
+        nextPath={nextPath}
+        action={verifyTwoFactorAction}
+      />
+    );
+  }
 
   return (
     <form action={formAction} style={FORM_STYLE}>

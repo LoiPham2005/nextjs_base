@@ -29,7 +29,7 @@ export function UserStatusButton({
 
     if (typeof window !== "undefined" && window.confirm(confirmMessage)) {
       startTransition(async () => {
-        const res = await setUserStatusAction(id, next);
+        const res = await setUserStatusAction(id, { status: next });
         if (res.error) window.alert(`Lỗi: ${res.error}`);
       });
     }

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionPayload } from "@/lib/session";
 import type * as UserServiceModule from "@/services/user.service";
-import { SelfDeletionError, UsernameAlreadyExistsError } from "@/lib/errors";
+import { SelfActionForbiddenError, DuplicateFieldError } from "@/lib/errors";
 
 /**
  * Đây là bài test quan trọng nhất trong repo.
@@ -29,7 +30,7 @@ vi.mock("@/services/user.service", async (importOriginal) => {
   const actual = await importOriginal<typeof UserServiceModule>();
   return {
     ...actual,
-    userService: { create: vi.fn(), delete: vi.fn() },
+    userService: { create: vi.fn(), softDelete: vi.fn() },
   };
 });
 
@@ -38,8 +39,18 @@ import { permissionService } from "@/services/permission.service";
 import { userService } from "@/services/user.service";
 import { createUserAction, deleteUserAction } from "./actions";
 
-const adminSession = { sub: "admin-1", email: "admin@example.com", role: "ADMIN" as const };
-const userSession = { sub: "user-1", email: "user@example.com", role: "USER" as const };
+const adminSession: SessionPayload = {
+  typ: "access",
+  sub: "admin-1",
+  email: "admin@example.com",
+  roles: ["ADMIN"],
+};
+const userSession: SessionPayload = {
+  typ: "access",
+  sub: "user-1",
+  email: "user@example.com",
+  roles: ["USER"],
+};
 
 function form(fields: Record<string, string>): FormData {
   const data = new FormData();
@@ -49,10 +60,11 @@ function form(fields: Record<string, string>): FormData {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Mặc định: ADMIN có mọi quyền, vai trò khác thì không. Test nào cần vai trò
-  // tuỳ chỉnh (ví dụ KE_TOAN được `user:create`) thì tự ghi đè.
-  vi.mocked(permissionService.can).mockImplementation((roleKey) =>
-    Promise.resolve(roleKey === "ADMIN"),
+  // Mặc định: tài khoản admin có mọi quyền, tài khoản thường thì không.
+  // `can` nhận userId chứ không nhận vai trò — một người mang được nhiều vai
+  // trò cùng lúc, và hợp quyền của chúng nằm dưới database.
+  vi.mocked(permissionService.can).mockImplementation((userId) =>
+    Promise.resolve(userId === adminSession.sub),
   );
 });
 
@@ -82,16 +94,18 @@ describe("createUserAction", () => {
       email: "new@example.com",
       username: "u",
       fullName: null,
-      roleName: "Người dùng",
       emailVerifiedAt: null,
       status: "ACTIVE",
       lockedUntil: null,
-      roles: "USER",
+      roles: ["USER"],
+      phone: null,
+      avatarUrl: null,
+      twoFactorEnabled: false,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
-    await createUserAction({}, form({ email: "new@example.com", roles: "ADMIN" }));
+    await createUserAction({}, form({ email: "new@example.com", roleKeys: "ADMIN" }));
 
     expect(vi.mocked(userService.create).mock.calls[0]?.[0].roleKeys).toBeUndefined();
   });
@@ -121,11 +135,13 @@ describe("createUserAction", () => {
       email: "new@example.com",
       username: "nguyenvana",
       fullName: "Nguyễn Văn A",
-      roleName: "Người dùng",
       emailVerifiedAt: null,
       status: "ACTIVE",
       lockedUntil: null,
-      roles: "USER",
+      roles: ["USER"],
+      phone: null,
+      avatarUrl: null,
+      twoFactorEnabled: false,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -148,14 +164,17 @@ describe("createUserAction", () => {
 
   it("đưa lỗi trùng tên đăng nhập về đúng ô username", async () => {
     vi.mocked(getSession).mockResolvedValue(adminSession);
-    vi.mocked(userService.create).mockRejectedValue(new UsernameAlreadyExistsError("trung"));
+    vi.mocked(userService.create).mockRejectedValue(new DuplicateFieldError("username", "trung"));
 
     const result = await createUserAction(
       {},
       form({ email: "new@example.com", username: "trung" }),
     );
 
-    expect(result.fieldErrors?.username?.[0]).toContain("trung");
+    // Lỗi phải rơi vào ĐÚNG ô `username`, không phải một câu chung chung ở đầu
+    // form: `DuplicateFieldError` mang sẵn tên trường trong `fields`.
+    expect(result.fieldErrors?.username?.[0]).toContain("Tên đăng nhập");
+    expect(result.fieldErrors?.email).toBeUndefined();
   });
 });
 
@@ -166,7 +185,7 @@ describe("deleteUserAction", () => {
     const result = await deleteUserAction("victim-id");
 
     expect(result.error).toContain("đăng nhập");
-    expect(userService.delete).not.toHaveBeenCalled();
+    expect(userService.softDelete).not.toHaveBeenCalled();
   });
 
   it("từ chối user thường — đây là lỗ hổng của bản cũ", async () => {
@@ -175,40 +194,32 @@ describe("deleteUserAction", () => {
     const result = await deleteUserAction("victim-id");
 
     expect(result.error).toContain("không có quyền");
-    expect(userService.delete).not.toHaveBeenCalled();
+    expect(userService.softDelete).not.toHaveBeenCalled();
   });
 
   it("truyền actorId xuống service để service tự áp luật tự-xoá", async () => {
     vi.mocked(getSession).mockResolvedValue(adminSession);
-    vi.mocked(userService.delete).mockRejectedValue(new SelfDeletionError());
+    vi.mocked(userService.softDelete).mockRejectedValue(new SelfActionForbiddenError("xoá"));
 
     const result = await deleteUserAction(adminSession.sub);
 
     // Action không tự kiểm luật nữa — nó chỉ chuyển tiếp danh tính người thao
     // tác và hiển thị lỗi service trả về.
-    expect(userService.delete).toHaveBeenCalledWith(adminSession.sub, adminSession.sub);
+    expect(userService.softDelete).toHaveBeenCalledWith(adminSession.sub, {
+      actorId: adminSession.sub,
+    });
     expect(result.error).toContain("tự xoá");
   });
 
   it("cho phép admin xoá người khác", async () => {
     vi.mocked(getSession).mockResolvedValue(adminSession);
-    vi.mocked(userService.delete).mockResolvedValue({
-      id: "victim-id",
-      email: "victim@example.com",
-      username: "u",
-      fullName: null,
-      roleName: "Người dùng",
-      emailVerifiedAt: null,
-      status: "ACTIVE",
-      lockedUntil: null,
-      roles: "USER",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    vi.mocked(userService.softDelete).mockResolvedValue();
 
     const result = await deleteUserAction("victim-id");
 
     expect(result.error).toBeUndefined();
-    expect(userService.delete).toHaveBeenCalledWith("victim-id", adminSession.sub);
+    expect(userService.softDelete).toHaveBeenCalledWith("victim-id", {
+      actorId: adminSession.sub,
+    });
   });
 });

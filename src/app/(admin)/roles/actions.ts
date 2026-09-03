@@ -1,5 +1,11 @@
 "use server";
-import { RoleInUseError, RoleKeyAlreadyExistsError, RoleNotFoundError, SystemRoleImmutableError, UnknownPermissionError } from "@/lib/errors";
+import {
+  RoleInUseError,
+  RoleKeyAlreadyExistsError,
+  RoleNotFoundError,
+  SystemRoleImmutableError,
+  UnknownPermissionError,
+} from "@/lib/errors";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";

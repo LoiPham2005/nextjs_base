@@ -39,7 +39,7 @@ import {
   WebAuthnVerificationError,
   assertLoginAllowed,
 } from "@/lib/errors";
-import { UserService } from "./user.service";
+import { type UserService } from "./user.service";
 
 /**
  * Đăng nhập bằng passkey (WebAuthn / FIDO2).
@@ -271,7 +271,7 @@ export class WebAuthnService {
           // Thư viện tự so counter và NÉM LỖI khi giá trị nhận về thấp hơn giá
           // trị đã lưu — dấu hiệu authenticator bị nhân bản.
           counter: Number(stored.counter),
-          transports: stored.transports as AuthenticatorTransport[],
+          transports: stored.transports,
         },
       });
     } catch (error) {

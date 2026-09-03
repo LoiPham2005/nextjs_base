@@ -1,6 +1,6 @@
 import { env, publicAppUrl } from "@/lib/env";
 import { apiPath } from "@/lib/api/version";
-import type { OAuthProviderId } from "./types";
+import { OAUTH_PROVIDERS, type OAuthProviderId } from "./types";
 
 export type ProviderConfig = {
   authorizationEndpoint: string;
@@ -62,6 +62,14 @@ export function isProviderConfigured(provider: OAuthProviderId): boolean {
         env.APPLE_CLIENT_ID && env.APPLE_TEAM_ID && env.APPLE_KEY_ID && env.APPLE_PRIVATE_KEY,
       );
   }
+}
+
+/**
+ * Danh sách provider ĐÃ cấu hình xong. Màn đăng nhập dùng nó để biết vẽ nút
+ * nào — vẽ một nút mà bấm vào ra lỗi cấu hình thì tệ hơn hẳn là không vẽ.
+ */
+export function configuredOAuthProviders(): OAuthProviderId[] {
+  return OAUTH_PROVIDERS.filter(isProviderConfigured);
 }
 
 /** redirect_uri phải TUYỆT ĐỐI và khớp 100% với cấu hình trên console của provider. */

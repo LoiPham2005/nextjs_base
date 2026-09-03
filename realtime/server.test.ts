@@ -54,7 +54,12 @@ describe("handshake", () => {
   });
 
   it("từ chối token bị sửa nội dung", async () => {
-    const token = await signSession({ sub: "u1", email: "a@b.com", typ: "access" as const, roles: ["USER"] });
+    const token = await signSession({
+      sub: "u1",
+      email: "a@b.com",
+      typ: "access" as const,
+      roles: ["USER"],
+    });
     const [header, body, signature] = token.split(".");
     const tampered = JSON.parse(atob(body!)) as Record<string, unknown>;
     tampered.role = "ADMIN";
@@ -64,7 +69,12 @@ describe("handshake", () => {
   });
 
   it("chấp nhận token hợp lệ", async () => {
-    const token = await signSession({ sub: "u1", email: "a@b.com", typ: "access" as const, roles: ["USER"] });
+    const token = await signSession({
+      sub: "u1",
+      email: "a@b.com",
+      typ: "access" as const,
+      roles: ["USER"],
+    });
     const socket = await connect(token);
 
     expect(socket.connected).toBe(true);
@@ -74,17 +84,37 @@ describe("handshake", () => {
 describe("phát tin theo người dùng", () => {
   it("tin nhắn tới MỌI thiết bị của người nhận, không lọt sang người khác", async () => {
     const alice = await connect(
-      await signSession({ sub: "alice", email: "alice@x.com", typ: "access" as const, roles: ["USER"] }),
+      await signSession({
+        sub: "alice",
+        email: "alice@x.com",
+        typ: "access" as const,
+        roles: ["USER"],
+      }),
     );
     // Bob mở hai thiết bị — cả hai phải cùng nhận.
     const bobPhone = await connect(
-      await signSession({ sub: "bob", email: "bob@x.com", typ: "access" as const, roles: ["USER"] }),
+      await signSession({
+        sub: "bob",
+        email: "bob@x.com",
+        typ: "access" as const,
+        roles: ["USER"],
+      }),
     );
     const bobLaptop = await connect(
-      await signSession({ sub: "bob", email: "bob@x.com", typ: "access" as const, roles: ["USER"] }),
+      await signSession({
+        sub: "bob",
+        email: "bob@x.com",
+        typ: "access" as const,
+        roles: ["USER"],
+      }),
     );
     const carol = await connect(
-      await signSession({ sub: "carol", email: "carol@x.com", typ: "access" as const, roles: ["USER"] }),
+      await signSession({
+        sub: "carol",
+        email: "carol@x.com",
+        typ: "access" as const,
+        roles: ["USER"],
+      }),
     );
 
     const received: string[] = [];

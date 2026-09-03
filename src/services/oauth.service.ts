@@ -9,7 +9,7 @@ import {
   OAuthEmailRequiredError,
   assertLoginAllowed,
 } from "@/lib/errors";
-import { UserService, toPublicUser } from "./user.service";
+import { type UserService, toPublicUser } from "./user.service";
 import type { OAuthProfile } from "@/lib/oauth/types";
 
 /**
@@ -116,6 +116,7 @@ export class OAuthService {
         username: true,
         status: true,
         emailVerifiedAt: true,
+        lockedUntil: true,
         twoFactorEnabledAt: true,
         createdAt: true,
         updatedAt: true,

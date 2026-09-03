@@ -534,7 +534,7 @@ mọi handler phải gọi `requireApiUser()` hoặc `requireApiAdmin()`.
 | `GET` | `/api/v1/users` | ADMIN |
 | `POST` | `/api/v1/users` | ADMIN |
 | `GET` | `/api/v1/users/{id}` | ADMIN hoặc chính mình |
-| `PATCH` | `/api/v1/users/{id}` | ADMIN hoặc chính mình — ⚠️ `roleKey` LUÔN đòi `user:update` |
+| `PATCH` | `/api/v1/users/{id}` | ADMIN hoặc chính mình — ⚠️ `roleKeys` LUÔN đòi `user:update` |
 | `DELETE` | `/api/v1/users/{id}` | ADMIN |
 | `PATCH` | `/api/v1/users/{id}/status` | ADMIN |
 | `POST` | `/api/v1/users/{id}/unlock` | ADMIN |
@@ -543,6 +543,30 @@ mọi handler phải gọi `requireApiUser()` hoặc `requireApiAdmin()`.
 | `GET` | `/api/v1/roles/{key}` | quyền `role:read` |
 | `PATCH` | `/api/v1/roles/{key}` | quyền `role:update` |
 | `DELETE` | `/api/v1/roles/{key}` | quyền `role:delete` |
+| `PUT` | `/api/v1/users/{id}/roles` | quyền `user:update` — THAY toàn bộ danh sách vai trò |
+| `GET`/`PUT` | `/api/v1/users/{id}/permissions` | ngoại lệ quyền cho từng người |
+| `DELETE` | `/api/v1/users/{id}/permissions/{permissionKey}` | gỡ ngoại lệ |
+| `GET` | `/api/v1/permissions` | danh mục quyền (đến từ code, không phải DB) |
+| `DELETE` | `/api/v1/auth/sessions` | đăng xuất MỌI thiết bị khác, giữ phiên hiện tại |
+| `GET`/`DELETE` | `/api/v1/auth/2fa` | trạng thái 2FA / tắt 2FA |
+| `POST` | `/api/v1/auth/2fa/{setup,enable,recovery-codes}` | bật 2FA ba bước |
+| `POST` | `/api/v1/auth/2fa/verify` | công khai — đổi vé 2FA + mã lấy token |
+| `GET` | `/api/v1/auth/passkeys` | danh sách passkey |
+| `POST` | `/api/v1/auth/passkeys/register/{options,verify}` | thêm passkey |
+| `POST` | `/api/v1/auth/passkeys/login/{options,verify}` | công khai — đăng nhập bằng passkey |
+| `PATCH`/`DELETE` | `/api/v1/auth/passkeys/{id}` | đổi tên / xoá passkey |
+| `POST` | `/api/v1/auth/change-email` | xin đổi email (gửi link tới địa chỉ MỚI) |
+| `POST` | `/api/v1/auth/change-email/confirm` | công khai — xác nhận bằng token trong link |
+| `POST` | `/api/v1/auth/phone/{request-otp,verify}` | ⚠️ mặc định TẮT — SMS tốn tiền |
+| `GET` | `/api/v1/auth/oauth/providers` | công khai — provider đã cấu hình |
+| `GET` | `/api/v1/auth/oauth/linked` | tài khoản đã liên kết |
+| `DELETE` | `/api/v1/auth/oauth/{provider}` | gỡ liên kết |
+| `GET`/`POST` | `/api/v1/notifications` | hộp thư của mình / gửi (`notification:send`) |
+| `GET` | `/api/v1/notifications/unread-count` | số chưa đọc |
+| `POST` | `/api/v1/notifications/{id}/read`, `/read-all` | đánh dấu đã đọc |
+| `GET`/`POST`/`DELETE` | `/api/v1/devices` | thiết bị nhận push |
+| `GET` | `/api/v1/audit-logs` | quyền `audit:read` — chỉ ĐỌC |
+| `POST` | `/api/v1/files` | quyền `file:upload` — kiểm magic bytes |
 | `GET` | `/api/v1/openapi.json` | công khai |
 | `GET` | `/api/health` | công khai (unversioned)|
 

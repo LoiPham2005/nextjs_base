@@ -70,7 +70,7 @@ async function handleCallback(
     const profile = await fetchOAuthProfile(provider, tokens, payload.appleUser);
     const user = await oauthService.loginWithProfile(profile);
 
-    await createSession({ sub: user.id, email: user.email, role: user.roles.join(", ") });
+    await createSession({ typ: "access", sub: user.id, email: user.email, roles: user.roles });
     logger.info("OAuth login", { userId: user.id, provider });
 
     return NextResponse.redirect(new URL(flow.next, request.url));

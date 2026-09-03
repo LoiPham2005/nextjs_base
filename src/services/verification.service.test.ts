@@ -183,7 +183,7 @@ describe("VerificationService — OTP", () => {
 
     await new VerificationService(db).issue("u1", "EMAIL_CHANGE", "moi@example.com");
 
-    const created = vi.mocked(db.verificationToken.create).mock.calls[0]![0]!.data as {
+    const created = vi.mocked(db.verificationToken.create).mock.calls[0]![0].data as {
       destination: string;
     };
     expect(created.destination).toBe("moi@example.com");

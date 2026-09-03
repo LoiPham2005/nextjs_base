@@ -5,6 +5,7 @@ import {
   PERMISSION_METADATA,
   SYSTEM_ROLES,
   isKnownPermission,
+  resolveSeedPermissions,
 } from "./permissions";
 
 /**
@@ -27,7 +28,10 @@ describe("danh mục PERMISSIONS", () => {
     // Thiếu mô tả thì giao diện phân quyền hiện ra một ô trống, và người quản
     // trị phải đoán xem mình đang tick vào cái gì.
     for (const permission of PERMISSIONS) {
-      expect(PERMISSION_METADATA[permission].description, `thiếu mô tả: ${permission}`).toBeTruthy();
+      expect(
+        PERMISSION_METADATA[permission].description,
+        `thiếu mô tả: ${permission}`,
+      ).toBeTruthy();
     }
   });
 });
@@ -45,16 +49,26 @@ describe("isKnownPermission", () => {
   });
 });
 
+function seedFor(key: string) {
+  const seed = DEFAULT_ROLE_PERMISSIONS.find((role) => role.key === key);
+  if (!seed) throw new Error(`Thiếu vai trò seed: ${key}`);
+  return seed;
+}
+
 describe("DEFAULT_ROLE_PERMISSIONS", () => {
-  it("có đủ hai vai trò hệ thống", () => {
+  it("có đủ mọi vai trò hệ thống khai trong SYSTEM_ROLES", () => {
+    // Khai trong `SYSTEM_ROLES` mà quên seed thì code tham chiếu tới vai trò
+    // đó vẫn biên dịch được, nhưng lúc chạy tra database sẽ không thấy gì.
     const keys = DEFAULT_ROLE_PERMISSIONS.map((role) => role.key);
-    expect(keys).toContain(SYSTEM_ROLES.USER);
-    expect(keys).toContain(SYSTEM_ROLES.ADMIN);
+
+    for (const key of Object.values(SYSTEM_ROLES)) {
+      expect(keys, `thiếu seed cho vai trò ${key}`).toContain(key);
+    }
   });
 
   it("mọi quyền được gán đều nằm trong danh mục", () => {
     for (const role of DEFAULT_ROLE_PERMISSIONS) {
-      for (const permission of role.permissions) {
+      for (const permission of resolveSeedPermissions(role)) {
         expect(PERMISSIONS, `${role.key} gán quyền lạ: ${permission}`).toContain(permission);
       }
     }
@@ -62,26 +76,75 @@ describe("DEFAULT_ROLE_PERMISSIONS", () => {
 
   it("không vai trò nào bị gán trùng một quyền hai lần", () => {
     for (const role of DEFAULT_ROLE_PERMISSIONS) {
-      expect(new Set(role.permissions).size, `${role.key} có quyền lặp`).toBe(
-        role.permissions.length,
+      const permissions = resolveSeedPermissions(role);
+      expect(new Set(permissions).size, `${role.key} có quyền lặp`).toBe(permissions.length);
+    }
+  });
+
+  it('SUPER_ADMIN dùng "*" và giải ra ĐÚNG toàn bộ danh mục', () => {
+    const superAdmin = seedFor(SYSTEM_ROLES.SUPER_ADMIN);
+
+    // Liệt kê tay thì mỗi lần thêm quyền mới lại phải nhớ bổ sung — quên một
+    // lần là SUPER_ADMIN mất quyền đó mà không ai để ý cho tới lúc cần dùng.
+    expect(superAdmin.permissions).toBe("*");
+    expect(resolveSeedPermissions(superAdmin)).toEqual(PERMISSIONS);
+  });
+
+  it("USER chỉ chạm được dữ liệu của chính mình", () => {
+    /*
+     * `notification:read` KHÔNG có hậu tố `:own` nhưng vẫn hợp lệ: service
+     * thông báo luôn lọc theo `userId` của người đang đăng nhập, không có
+     * đường nào đọc hộp thư của người khác.
+     *
+     * Thứ phải chặn là các quyền chạm tới dữ liệu NGƯỜI KHÁC — quản lý người
+     * dùng, phân quyền, nhật ký, gửi thông báo cho người khác.
+     */
+    const forbidden = ["user:", "role:", "audit:"];
+
+    for (const permission of resolveSeedPermissions(seedFor(SYSTEM_ROLES.USER))) {
+      for (const prefix of forbidden) {
+        expect(permission.startsWith(prefix), `USER không được có ${permission}`).toBe(false);
+      }
+      expect(permission, "USER không được gửi thông báo cho người khác").not.toBe(
+        "notification:send",
       );
     }
   });
 
-  it("USER không có quyền nào trên dữ liệu người khác", () => {
-    const user = DEFAULT_ROLE_PERMISSIONS.find((role) => role.key === SYSTEM_ROLES.USER);
+  it("bậc quyền lực (level) không trùng nhau và tăng dần theo độ mạnh", () => {
+    // `Role.level` là thứ chặn leo thang đặc quyền: `assertCanActOn` từ chối
+    // khi mục tiêu có level ≥ level của người thao tác. Hai vai trò cùng level
+    // nghĩa là chúng thao tác được lên nhau — gần như luôn là nhầm.
+    const levels = DEFAULT_ROLE_PERMISSIONS.map((role) => role.level);
 
-    for (const permission of user?.permissions ?? []) {
-      expect(permission, `USER không được có ${permission}`).toMatch(/:own$/);
-    }
+    expect(new Set(levels).size, "có hai vai trò trùng level").toBe(levels.length);
+    expect(seedFor(SYSTEM_ROLES.SUPER_ADMIN).level).toBeGreaterThan(
+      seedFor(SYSTEM_ROLES.ADMIN).level,
+    );
+    expect(seedFor(SYSTEM_ROLES.USER).level).toBe(0);
   });
 
-  it("ADMIN có mọi quyền của USER", () => {
-    const user = DEFAULT_ROLE_PERMISSIONS.find((role) => role.key === SYSTEM_ROLES.USER);
-    const admin = DEFAULT_ROLE_PERMISSIONS.find((role) => role.key === SYSTEM_ROLES.ADMIN);
+  it("vai trò level cao hơn có đủ mọi quyền của vai trò ngay dưới nó", () => {
+    /*
+     * Ràng buộc thật sự quan trọng.
+     *
+     * `Role.level` nói "vai trò này mạnh hơn", còn bảng quyền mới là thứ quyết
+     * định làm được gì. Nếu hai thứ lệch nhau — MANAGER level 20 nhưng thiếu
+     * một quyền mà STAFF level 10 có — thì admin sẽ thăng cấp cho ai đó và vô
+     * tình lấy mất quyền của họ.
+     */
+    const ordered = [...DEFAULT_ROLE_PERMISSIONS].sort((a, b) => a.level - b.level);
 
-    for (const permission of user?.permissions ?? []) {
-      expect(admin?.permissions, `ADMIN thiếu ${permission}`).toContain(permission);
+    for (let index = 1; index < ordered.length; index += 1) {
+      const lower = resolveSeedPermissions(ordered[index - 1]!);
+      const higher = new Set(resolveSeedPermissions(ordered[index]!));
+
+      for (const permission of lower) {
+        expect(
+          higher.has(permission),
+          `${ordered[index]!.key} (level ${ordered[index]!.level}) thiếu ${permission} mà ${ordered[index - 1]!.key} có`,
+        ).toBe(true);
+      }
     }
   });
 });

@@ -7,6 +7,7 @@ Tài liệu này cung cấp hướng dẫn toàn diện về kiến trúc phân 
 ## 📌 1. Triết Lý Thiết Kế & Kiến Trúc
 
 ### 1.1. Tại sao KHÔNG tách riêng bảng `Admin` và bảng `User`?
+
 - **Tránh trùng lặp mã nguồn (DRY):** Hệ thống xác thực (Bcrypt hash, JWT access token, Refresh Token rotation, OAuth Google/Github/Apple, OTP Email) được dùng chung cho mọi đối tượng.
 - **Dễ mở rộng vai trò (Extensibility):** Hỗ trợ thêm nhiều vai trò mới như `SUPER_ADMIN`, `ADMIN`, `MODERATOR`, `ACCOUNTANT`, `USER`, `VIP_USER` mà không cần sửa cấu trúc bảng cơ sở dữ liệu.
 - **Tối ưu quan hệ dữ liệu (Data Integrity):** Các bảng nghiệp vụ (`AuditLog`, `Order`, `Post`, `Comment`...) chỉ cần trỏ khóa ngoại `userId` duy nhất về bảng `User`.
@@ -84,6 +85,7 @@ erDiagram
 ## 🛠️ 2. Quy Trình Hoạt Động Cốt Lõi (Core Workflows)
 
 ### 2.1. Luồng Xác thực (Authentication)
+
 1. **Đăng nhập (Password hoặc OAuth):**
    - Kiểm tra `status === ACTIVE` và `lockedUntil < now()`.
    - Nếu đăng nhập sai quá số lần quy định (`failedLoginAttempts >= 5`) -> Khóa tạm thời tài khoản (`lockedUntil = now() + 15m`).
@@ -128,6 +130,7 @@ sequenceDiagram
 ## 📋 3. Lộ Trình Triển Khai & Phát Triển (Development Roadmap)
 
 ### Giai Đoạn 1: Seeding Dữ Liệu & Khởi Tạo Phân Quyền Cơ Bản
+
 - [x] **Tạo Permissions chuẩn theo định dạng `resource:action` (kèm `category` và `name`)**:
   - Quản lý người dùng: `user:read`, `user:create`, `user:update`, `user:delete`
   - Hồ sơ cá nhân: `profile:read:own`, `profile:update:own`
@@ -145,29 +148,31 @@ sequenceDiagram
 ---
 
 ### Giai Đoạn 2: Xây Dựng Service & Middleware Bảo Vệ
+
 - [ ] **Tạo Utility / Decorator kiểm tra quyền (`requirePermission`)**:
   ```typescript
   // Ví dụ hàm guard kiểm tra quyền trong Route Handler
-  export async function checkPermission(userId: string, requiredPermission: string): Promise<boolean> {
+  export async function checkPermission(
+    userId: string,
+    requiredPermission: string,
+  ): Promise<boolean> {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: {
         role: {
           include: {
             permissions: {
-              include: { permission: true }
-            }
-          }
-        }
-      }
+              include: { permission: true },
+            },
+          },
+        },
+      },
     });
 
-    if (!user || user.status !== 'ACTIVE') return false;
-    if (user.role.key === 'SUPER_ADMIN') return true; // Super admin bypass
+    if (!user || user.status !== "ACTIVE") return false;
+    if (user.role.key === "SUPER_ADMIN") return true; // Super admin bypass
 
-    return user.role.permissions.some(
-      (rp) => rp.permission.key === requiredPermission
-    );
+    return user.role.permissions.some((rp) => rp.permission.key === requiredPermission);
   }
   ```
 - [ ] Tích hợp ghi `AuditLog` tự động mỗi khi có thay đổi quan trọng (gán quyền, khóa tài khoản, đổi mật khẩu).
@@ -177,7 +182,9 @@ sequenceDiagram
 ### Giai Đoạn 3: Nâng Cấp Nâng Cao (Khi Hệ Thống Phát Triển Lớn)
 
 #### 1. Tách Hồ Sơ Người Dùng (`UserProfile`)
+
 Tránh để bảng `User` bị phình to khi thêm các trường như địa chỉ, ảnh đại diện, ngày sinh, CCCD/CMND:
+
 ```prisma
 model UserProfile {
   id          String    @id @default(cuid())
@@ -194,7 +201,9 @@ model UserProfile {
 ```
 
 #### 2. Chuyển Sang Mô Hình Multi-Role (Nếu 1 User có nhiều vai trò)
+
 Nếu nghiệp vụ yêu cầu một người vừa làm `STAFF` vừa làm `ACCOUNTANT`:
+
 ```prisma
 model UserRole {
   userId String
@@ -208,6 +217,7 @@ model UserRole {
 ```
 
 #### 3. Cấp / Chặn Quyền Trực Tiếp Cho Từng User (`UserPermission`)
+
 Giải quyết bài toán: **2 người có cùng vai trò `STAFF`, nhưng Nhân viên A được sếp cấp thêm quyền `order:delete` (hoặc bị tước quyền `order:create`), còn Nhân viên B thì không.**
 
 ```prisma
@@ -239,15 +249,15 @@ export async function getUserEffectivePermissions(userId: string): Promise<strin
         include: {
           role: {
             include: {
-              permissions: { include: { permission: true } }
-            }
-          }
-        }
+              permissions: { include: { permission: true } },
+            },
+          },
+        },
       },
       userPermissions: {
-        include: { permission: true }
-      }
-    }
+        include: { permission: true },
+      },
+    },
   });
 
   if (!user) return [];
@@ -274,6 +284,7 @@ export async function getUserEffectivePermissions(userId: string): Promise<strin
 ```
 
 #### 4. Tối Ưu Hiệu Năng Với Redis Cache
+
 - Cache danh sách `permissions` của từng `roleKey` hoặc `userId` vào Redis với TTL ngắn (5 - 15 phút).
 - Khi Admin cập nhật quyền của Role hoặc User -> Xóa cache (Cache Invalidation) để quyền mới có hiệu lực ngay lập tức mà không cần chờ token hết hạn.
 
@@ -282,14 +293,17 @@ export async function getUserEffectivePermissions(userId: string): Promise<strin
 ### Giai Đoạn 4: Push Notification Chuẩn Enterprise (Direct, Topic & Broadcast)
 
 #### 1. Tại sao `RefreshToken` KHÔNG THỂ thay thế bảng `UserDevice`?
+
 - **`RefreshToken` (Session Auth):** Vòng đời ngắn, thay đổi liên tục khi xoay vòng token (Refresh Token Rotation) hoặc bị xóa khi hết hạn (7-30 ngày). 1 máy mở nhiều tab có thể sinh nhiều dòng `RefreshToken`.
 - **`UserDevice` (FCM Token / Push Token):** Vòng đời dài (gắn liền với thiết bị cho đến khi gỡ app). 1 máy vật lý chỉ có **đúng 1 FCM Token duy nhất**. Nếu nhét vào `RefreshToken`, khi gửi push khách hàng sẽ bị nổ chuông trùng lặp 5-10 lần cho 1 thông báo!
 
 #### 2. Vấn đề "Gửi 1 tin cho 1.000.000 người" và Mô hình 2 bảng chuẩn
+
 > ❌ **Nếu dùng 1 bảng `Notification (userId, title, body)`:** Khi gửi 1 tin khuyến mãi cho 1.000.000 người, DB phải insert 1.000.000 dòng lặp lại cùng một đoạn text -> Phình to hàng trăm MB, nghẽn DB.  
 > ✅ **Chuẩn Enterprise (Tách 2 bảng):** Bảng `Notification` chỉ lưu **1 dòng nội dung gốc**, còn bảng `NotificationRecipient` lưu trạng thái đọc/nhận của từng người -> Tiết kiệm 94% dung lượng DB.
 
 #### 3. Cấu Trúc Schema Chuẩn Cho UserDevice & Notification Hệ Thống
+
 ```prisma
 enum DevicePlatform {
   IOS
@@ -346,12 +360,12 @@ model NotificationRecipient {
   id             String       @id @default(cuid())
   notificationId String
   userId         String
-  
+
   isRead         Boolean      @default(false) // Đã bấm xem ở chuông 🔔 chưa
   readAt         DateTime?
   isPushed       Boolean      @default(false) // Push FCM tới thiết bị thành công chưa
   pushedAt       DateTime?
-  
+
   createdAt      DateTime     @default(now())
 
   notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
@@ -365,6 +379,7 @@ model NotificationRecipient {
 ```
 
 #### 4. Quy Trình Gửi Thông Báo (Direct & Broadcast Flow)
+
 1. **Đăng ký thiết bị:** Mobile/Web login -> Firebase SDK lấy `fcmToken` -> Gọi API `POST /api/devices/register` lưu vào bảng `UserDevice`.
 2. **Kích hoạt gửi (Trigger Event):**
    - **Gửi 1-1 (Direct):** Tạo `Notification` + 1 dòng `NotificationRecipient` -> Lấy `fcmTokens` của user từ bảng `UserDevice` -> Đẩy Job vào Queue.

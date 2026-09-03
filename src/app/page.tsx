@@ -32,9 +32,14 @@ export default async function HomePage() {
 
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           {user ? (
-            <Button asChild size="lg">
-              <Link href="/users">Vào khu quản trị</Link>
-            </Button>
+            <>
+              <Button asChild size="lg">
+                <Link href="/users">Vào khu quản trị</Link>
+              </Button>
+              <Button asChild size="lg" variant="outline">
+                <Link href="/security">Bảo mật tài khoản</Link>
+              </Button>
+            </>
           ) : (
             <Button asChild size="lg">
               <Link href="/login">Đăng nhập</Link>

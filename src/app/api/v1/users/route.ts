@@ -1,35 +1,33 @@
 import { z } from "zod";
 import { requireApiPermission } from "@/lib/api/auth";
 import { apiErrors, apiOk, handleApiError, parseJsonBody } from "@/lib/api/response";
-import { createUserSchema } from "@/schemas/user.schema";
+import { createUserSchema, listUsersSchema } from "@/schemas/user.schema";
 import { userService } from "@/services/user.service";
 
 export const dynamic = "force-dynamic";
-
-const listQuerySchema = z.object({
-  cursor: z.string().min(1).optional(),
-  perPage: z.coerce.number().int().min(1).max(100).default(20),
-});
 
 export async function GET(request: Request) {
   try {
     await requireApiPermission(request, "user:read");
 
+    /*
+     * Phân trang theo TRANG thay vì cursor.
+     *
+     * Cursor tốt cho luồng cuộn vô hạn, nhưng màn quản trị cần "trang 7" và
+     * cần biết TỔNG số bản ghi — cursor không cho cả hai. `userService.list`
+     * trả `items` + `meta` trong một lần gọi, nên không có chuyện đếm và lấy
+     * trang nhìn thấy hai trạng thái khác nhau của bảng.
+     */
     const url = new URL(request.url);
-    const parsed = listQuerySchema.safeParse({
-      cursor: url.searchParams.get("cursor") ?? undefined,
-      perPage: url.searchParams.get("perPage") ?? undefined,
-    });
+    const parsed = listUsersSchema.safeParse(Object.fromEntries(url.searchParams));
 
     if (!parsed.success) {
       throw apiErrors.validation(z.flattenError(parsed.error).fieldErrors);
     }
 
-    const { cursor, perPage } = parsed.data;
+    const { items, meta } = await userService.list(parsed.data);
 
-    const { users, nextCursor } = await userService.list({ cursor, take: perPage });
-
-    return apiOk({ users, pagination: { perPage, nextCursor } });
+    return apiOk({ items, meta });
   } catch (error) {
     return handleApiError(error, { route: "GET /api/v1/users", request });
   }

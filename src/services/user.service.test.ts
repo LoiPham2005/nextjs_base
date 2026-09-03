@@ -56,8 +56,12 @@ function createDb(
       }),
     },
     userProfile: { upsert: vi.fn() },
-    $transaction: vi.fn(async (arg: unknown) =>
-      typeof arg === "function" ? (arg as (tx: unknown) => unknown)(createTx()) : [],
+    // Chạy callback ngay tại chỗ thay vì mở transaction thật: test này kiểm
+    // logic nghiệp vụ, không kiểm Postgres.
+    $transaction: vi.fn((arg: unknown) =>
+      Promise.resolve(
+        typeof arg === "function" ? (arg as (tx: unknown) => unknown)(createTx()) : [],
+      ),
     ),
   } as unknown as PrismaClient;
 }
@@ -81,7 +85,7 @@ describe("UserService", () => {
 
       await new UserService(db).create({ ...baseInput, password: "matkhau123" });
 
-      const data = vi.mocked(db.user.create).mock.calls[0]![0]!.data as { password: string };
+      const data = vi.mocked(db.user.create).mock.calls[0]![0].data as { password: string };
       expect(data.password).not.toBe("matkhau123");
       expect(data.password).toMatch(/^\$argon2id\$/);
     });
@@ -93,7 +97,7 @@ describe("UserService", () => {
 
       await new UserService(db).create(baseInput);
 
-      const data = vi.mocked(db.user.create).mock.calls[0]![0]!.data as { password: null };
+      const data = vi.mocked(db.user.create).mock.calls[0]![0].data as { password: null };
       expect(data.password).toBeNull();
     });
 
@@ -134,7 +138,7 @@ describe("UserService", () => {
 
       const user = await new UserService(db).create(baseInput);
 
-      const select = vi.mocked(db.user.create).mock.calls[0]![0]!.select as Record<string, unknown>;
+      const select = vi.mocked(db.user.create).mock.calls[0]![0].select as Record<string, unknown>;
       expect(select.password).toBeUndefined();
       expect(user).not.toHaveProperty("password");
     });

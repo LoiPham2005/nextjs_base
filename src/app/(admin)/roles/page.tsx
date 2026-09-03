@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { requirePermission } from "@/lib/auth";
-import { PERMISSIONS, PERMISSION_METADATA , type Permission } from "@/lib/permissions";
+import { PERMISSIONS, PERMISSION_METADATA, type Permission } from "@/lib/permissions";
 import { permissionService } from "@/services/permission.service";
 import { roleService } from "@/services/role.service";
 import { RoleCreateForm } from "./role-create-form";
@@ -32,7 +32,10 @@ export default async function RolesPage() {
     permissionService.can(currentUser.id, "role:delete"),
   ]);
 
-  const options = PERMISSIONS.map((key) => ({ key, description: PERMISSION_METADATA[key].description }));
+  const options = PERMISSIONS.map((key) => ({
+    key,
+    description: PERMISSION_METADATA[key].description,
+  }));
 
   return (
     <>

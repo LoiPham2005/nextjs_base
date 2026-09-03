@@ -46,7 +46,7 @@ describe("TwoFactorService", () => {
 
       const setup = await new TwoFactorService(db).beginSetup("u1");
 
-      const data = vi.mocked(db.user.update).mock.calls[0]![0]!.data as {
+      const data = vi.mocked(db.user.update).mock.calls[0]![0].data as {
         twoFactorSecret: string;
         twoFactorEnabledAt?: unknown;
       };

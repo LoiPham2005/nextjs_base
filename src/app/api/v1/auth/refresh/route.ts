@@ -3,6 +3,7 @@ import { enforceRateLimit } from "@/lib/api/auth";
 import { apiErrors, apiOk, handleApiError, parseJsonBody } from "@/lib/api/response";
 import { RATE_LIMITS } from "@/lib/rate-limit";
 import { ACCESS_TOKEN_MAX_AGE_SECONDS, signSession } from "@/lib/session";
+import { userService } from "@/services/user.service";
 import { tokenService } from "@/services/token.service";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,9 @@ export async function POST(request: Request) {
 
     const { refreshToken } = await parseJsonBody(request, refreshSchema);
 
-    const rotated = await tokenService.rotate(refreshToken, request.headers.get("user-agent"));
+    const rotated = await tokenService.rotate(refreshToken, {
+      userAgent: request.headers.get("user-agent"),
+    });
 
     // null = token không tồn tại hoặc đã hết hạn. Trường hợp token bị dùng lại
     // sau khi thu hồi thì service ném RefreshTokenReuseError và huỷ mọi phiên;
@@ -32,11 +35,23 @@ export async function POST(request: Request) {
       throw apiErrors.unauthenticated("Refresh token không hợp lệ hoặc đã hết hạn");
     }
 
+    /*
+     * Tra lại user thay vì tin dữ liệu gắn kèm token cũ.
+     *
+     * Refresh là đúng thời điểm để nhặt thay đổi: vai trò có thể vừa bị gỡ,
+     * tài khoản có thể vừa bị khoá. Ký lại một token mang vai trò cũ là kéo dài
+     * thêm một vòng đời cho trạng thái đã lỗi thời.
+     */
+    const user = await userService.findById(rotated.userId);
+    if (!user) throw apiErrors.unauthenticated("Refresh token không hợp lệ hoặc đã hết hạn");
+
     const accessToken = await signSession(
       {
-        sub: rotated.userId,
-        email: rotated.user.email,
-        roles: rotated.user.roles,
+        typ: "access",
+        sub: user.id,
+        email: user.email,
+        roles: user.roles,
+        sid: rotated.refresh.familyId,
       },
       ACCESS_TOKEN_MAX_AGE_SECONDS,
     );

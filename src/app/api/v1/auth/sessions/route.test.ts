@@ -17,12 +17,12 @@ vi.mock("@/services/token.service", () => ({
   tokenService: { listActive: vi.fn(), revokeById: vi.fn() },
 }));
 
-import { signSession } from "@/lib/session";
+import { signSession, type SessionPayload } from "@/lib/session";
 import { tokenService } from "@/services/token.service";
 import { GET } from "./route";
 import { DELETE } from "./[id]/route";
 
-const owner = { sub: "u-1", email: "a@b.com", role: "USER" as const };
+const owner: SessionPayload = { typ: "access", sub: "u-1", email: "a@b.com", roles: ["USER"] };
 
 type ErrorBody = { error: { code: string } };
 type SessionsBody = { data: { sessions: { id: string; userAgent: string | null }[] } };
@@ -62,6 +62,7 @@ describe("GET /api/v1/auth/sessions", () => {
       {
         id: "s-1",
         userAgent: "Mozilla/5.0 (iPhone)",
+        ip: "203.0.113.7",
         createdAt: new Date("2026-08-01T10:00:00Z"),
         expiresAt: new Date("2026-09-01T10:00:00Z"),
       },

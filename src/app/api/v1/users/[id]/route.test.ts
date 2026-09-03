@@ -17,7 +17,7 @@ vi.mock("@/services/user.service", async (importOriginal) => {
   const actual = await importOriginal<typeof UserServiceModule>();
   return {
     ...actual,
-    userService: { findById: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    userService: { findById: vi.fn(), update: vi.fn(), softDelete: vi.fn() },
   };
 });
 
@@ -25,13 +25,23 @@ vi.mock("@/services/permission.service", () => ({
   permissionService: { can: vi.fn(), canActOnResource: vi.fn() },
 }));
 
-import { signSession } from "@/lib/session";
+import { signSession, type SessionPayload } from "@/lib/session";
 import { userService } from "@/services/user.service";
 import { permissionService } from "@/services/permission.service";
 import { PATCH } from "./route";
 
-const admin = { sub: "admin-1", email: "admin@example.com", role: "ADMIN" as const };
-const user = { sub: "user-1", email: "user@example.com", role: "USER" as const };
+const admin: SessionPayload = {
+  typ: "access",
+  sub: "admin-1",
+  email: "admin@example.com",
+  roles: ["ADMIN"],
+};
+const user: SessionPayload = {
+  typ: "access",
+  sub: "user-1",
+  email: "user@example.com",
+  roles: ["USER"],
+};
 
 type ErrorBody = { error: { code: string } };
 
@@ -40,11 +50,13 @@ const updated = {
   email: "user@example.com",
   username: "user",
   fullName: "Tên mới",
-  roles: "USER",
-  roleName: "Người dùng",
+  roles: ["USER"],
+  phone: null,
+  avatarUrl: null,
+  twoFactorEnabled: false,
+  lockedUntil: null,
   emailVerifiedAt: null,
   status: "ACTIVE" as const,
-  lockedUntil: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -68,8 +80,9 @@ beforeEach(() => {
   cookieStore.get.mockReturnValue(undefined);
   vi.mocked(userService.update).mockResolvedValue(updated);
   // Mặc định: chỉ ADMIN có `user:update`.
-  vi.mocked(permissionService.can).mockImplementation((roleKey) =>
-    Promise.resolve(roleKey === "ADMIN"),
+  // `can` nhận userId, không nhận vai trò: vai trò nằm dưới database.
+  vi.mocked(permissionService.can).mockImplementation((userId) =>
+    Promise.resolve(userId === admin.sub),
   );
 });
 
@@ -114,7 +127,7 @@ describe("PATCH /api/v1/users/[id]", () => {
     vi.mocked(permissionService.canActOnResource).mockResolvedValue(true);
     const token = await signSession(user);
 
-    const response = await patch("user-1", { roleKey: "ADMIN" }, token);
+    const response = await patch("user-1", { roleKeys: ["ADMIN"] }, token);
     const body = (await response.json()) as ErrorBody;
 
     expect(response.status).toBe(403);
@@ -126,12 +139,12 @@ describe("PATCH /api/v1/users/[id]", () => {
     vi.mocked(permissionService.canActOnResource).mockResolvedValue(true);
     const token = await signSession(admin);
 
-    const response = await patch("user-1", { roleKey: "ADMIN" }, token);
+    const response = await patch("user-1", { roleKeys: ["ADMIN"] }, token);
 
     expect(response.status).toBe(200);
     // actorId phải được truyền xuống service — đó là thứ giữ luật "không tự
-    // đổi vai trò của chính mình".
-    expect(vi.mocked(userService.update).mock.calls[0]?.[2]).toBe("admin-1");
+    // đổi vai trò của chính mình" và luật cấm leo thang theo `Role.level`.
+    expect(vi.mocked(userService.update).mock.calls[0]?.[2]).toEqual({ actorId: "admin-1" });
   });
 
   it("422 khi body sai định dạng", async () => {

@@ -2,15 +2,23 @@ import { describe, expect, it } from "vitest";
 import { signSession, verifySession, type SessionPayload } from "./session";
 
 const payload: SessionPayload = {
+  typ: "access",
   sub: "user-1",
   email: "user@example.com",
-  typ: "access" as const, roles: ["ADMIN"],
+  roles: ["ADMIN"],
 };
 
 describe("session", () => {
   it("ký rồi verify lại ra đúng payload ban đầu", async () => {
     const token = await signSession(payload);
-    await expect(verifySession(token)).resolves.toEqual(payload);
+
+    // `toMatchObject` chứ không `toEqual`: JWT tự thêm `iat`, và đó là thứ
+    // `SecurityStampService` dùng để vô hiệu mọi access token đã phát trước
+    // thời điểm đổi mật khẩu. Mất nó thì đổi mật khẩu không đá được ai ra.
+    const verified = await verifySession(token);
+
+    expect(verified).toMatchObject(payload);
+    expect(verified?.iat).toBeTypeOf("number");
   });
 
   it("trả null khi không có token", async () => {

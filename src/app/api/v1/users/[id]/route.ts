@@ -17,7 +17,7 @@ export async function GET(request: Request, { params }: RouteContext) {
     // Đọc được hồ sơ người khác cần quyền `user:read`; hồ sơ của chính mình
     // thì chỉ cần `profile:read:own`. Luật gói trong canActOnResource để không
     // bị chép lại — và chép sai — ở từng route.
-    const allowed = await permissionService.canActOnResource(session.roles, id, session.sub, {
+    const allowed = await permissionService.canActOnResource(session.sub, id, {
       any: "user:read",
       own: "profile:read:own",
     });
@@ -60,7 +60,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
     const body = await parseJsonBody(request, updateUserSchema);
 
-    const allowed = await permissionService.canActOnResource(session.roles, id, session.sub, {
+    const allowed = await permissionService.canActOnResource(session.sub, id, {
       any: "user:update",
       own: "profile:update:own",
     });
@@ -90,7 +90,7 @@ export async function DELETE(request: Request, { params }: RouteContext) {
     // SelfDeletionError thành 409. Refresh token có onDelete: Cascade nên mọi
     // phiên của user này biến mất cùng lúc — xoá tài khoản mà token còn sống
     // được thì vô nghĩa.
-    await userService.softDelete(id, session.sub);
+    await userService.softDelete(id, { actorId: session.sub });
 
     return apiOk({ id });
   } catch (error) {

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { OAuthButtons, OAuthErrorBanner } from "../oauth-buttons";
 import { LoginForm } from "./login-form";
+import { PasskeyButton } from "./passkey-button";
 
 export const metadata: Metadata = { title: "Đăng nhập" };
 
@@ -35,6 +36,11 @@ export default async function LoginPage({
         <OAuthButtons next={next} />
 
         <LoginForm nextPath={next} />
+
+        {/* Dưới form mật khẩu, không phải trên: passkey vẫn là lựa chọn thứ
+            hai với đa số người dùng hôm nay, và đảo thứ tự làm màn hình quen
+            thuộc trở nên lạ. Nút tự ẩn nếu trình duyệt không hỗ trợ. */}
+        <PasskeyButton nextPath={next} />
 
         <p style={{ marginTop: 20, fontSize: "0.9rem", color: "var(--text-muted)" }}>
           <Link href="/forgot-password">Quên mật khẩu?</Link>

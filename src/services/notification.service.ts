@@ -1,7 +1,10 @@
 import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildPaginationMeta, toPrismaPage } from "@/schemas/common.schema";
-import { type ListNotificationsInput, type SendNotificationInput } from "@/schemas/notification.schema";
+import {
+  type ListNotificationsInput,
+  type SendNotificationInput,
+} from "@/schemas/notification.schema";
 import { enqueue } from "@/lib/queue";
 
 /**

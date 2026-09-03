@@ -84,6 +84,11 @@ export default tseslint.config(
       // `vi.mocked(prisma.user.create)` là cách dùng đúng và bắt buộc của
       // vitest, nhưng rule này đọc nó thành method bị tách khỏi object.
       "@typescript-eslint/unbound-method": "off",
+
+      // `expect.any(Date)`, `expect.objectContaining(...)` được vitest khai
+      // kiểu trả về là `any` — đó là bản chất của matcher bất đối xứng, không
+      // phải chỗ mất kiểu do viết ẩu. Rule này chỉ có ý nghĩa với code thật.
+      "@typescript-eslint/no-unsafe-assignment": "off",
     },
   },
 

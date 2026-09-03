@@ -30,14 +30,13 @@ export default async function UsersPage({
   const { page } = await searchParams;
 
   /*
-   * Phân trang theo TRANG, không phải page.
-   *
    * `userService.list` trả cả `items` lẫn `meta` (tổng số, số trang, còn trang
    * sau không) trong MỘT lần gọi — trước đây phải gọi thêm `count()` riêng, và
    * hai truy vấn đó có thể thấy hai trạng thái khác nhau của bảng.
    */
+  const currentPage = Number(page) || 1;
   const { items: users, meta } = await userService.list({
-    page: Number(page) || 1,
+    page: currentPage,
     limit: PER_PAGE,
     includeDeleted: false,
   });
@@ -115,17 +114,13 @@ export default async function UsersPage({
         )}
 
         {/*
-          Phân trang kiểu CURSOR, không phải offset.
-          `OFFSET 10000` buộc Postgres đọc rồi vứt đi 10000 dòng ở mỗi lần lật
-          trang. Tệ hơn: danh sách này đang được sửa liên tục (thêm, khoá, xoá),
-          mà offset thì lệch ngay khi có dòng chèn vào giữa — người dùng lật
-          trang và thấy một bản ghi hai lần, hoặc bỏ sót một bản ghi.
+          Phân trang theo SỐ TRANG, không phải cursor.
 
-          Đổi lại, page không cho "Trang trước" miễn phí. Không sao: mỗi
-          trang là một URL riêng, nên nút Back của trình duyệt chính là "trang
-          trước" — hoạt động đúng, không cần code gì thêm.
+          Cursor cuộn vô hạn tốt hơn, nhưng màn quản trị cần nhảy tới "trang 7"
+          và cần biết TỔNG số bản ghi — cursor không cho cả hai. Mỗi trang là
+          một URL riêng nên nút Back của trình duyệt vẫn làm đúng việc của nó.
         */}
-        {(page || meta.hasNext) && (
+        {(meta.page > 1 || meta.hasNext) && (
           <div
             style={{
               display: "flex",
@@ -138,18 +133,20 @@ export default async function UsersPage({
             }}
           >
             <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-              {users.length} / {meta.total} người dùng
+              Trang {meta.page}/{meta.totalPages} · {meta.total} người dùng
             </span>
 
             <div style={{ display: "flex", gap: 8 }}>
-              {page && (
+              {meta.page > 1 && (
                 <Button asChild variant="outline" size="sm">
-                  <Link href="/users">← Về đầu danh sách</Link>
+                  <Link href={{ pathname: "/users", query: { page: meta.page - 1 } }}>
+                    ← Trang trước
+                  </Link>
                 </Button>
               )}
               {meta.hasNext && (
                 <Button asChild variant="outline" size="sm">
-                  <Link href={{ pathname: "/users", query: { page: meta.hasNext } }}>
+                  <Link href={{ pathname: "/users", query: { page: meta.page + 1 } }}>
                     Trang sau →
                   </Link>
                 </Button>

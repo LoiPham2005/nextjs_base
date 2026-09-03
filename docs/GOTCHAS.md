@@ -115,6 +115,33 @@ Muốn giải phóng email cho phép đăng ký lại sau khi xoá mềm, nhưng
 không có công thức chung, mỗi cột phải tự quyết định "giải phóng bằng cách nào" (null hoá nếu
 nullable, mangle giá trị nếu bắt buộc).
 
+## 8. `next build` đổ với `t.openapi is not a function`, còn `next dev` và `vitest` thì xanh
+
+`@asteasolutions/zod-to-openapi` gắn `.openapi()` vào `ZodType.prototype` bằng một module chỉ có
+side effect (`import "./zod-openapi"`), và đòi module ấy chạy **trước** khi bất kỳ Zod schema nào
+được tạo.
+
+Điều kiện đó giữ được trong Node thuần (vitest, `next dev`) nhưng **không** giữ được khi Turbopack
+gom bundle production: nó đánh giá `src/schemas/*` trước module vá, nên mọi schema hình thành xong
+trước khi `.openapi()` tồn tại. Kết quả là một lỗi chỉ xuất hiện ở bước cuối cùng trước khi deploy.
+
+**Fix**: bỏ hẳn thư viện, dùng `z.toJSONSchema()` có sẵn của Zod 4 —
+`src/lib/openapi/registry.ts`. Không cần vá prototype, nên thứ tự nạp module không còn ảnh hưởng
+gì, và bớt được một dependency 78KB.
+
+**Bài học**: thư viện nào yêu cầu "import file này TRƯỚC mọi thứ khác" đều là một quả bom hẹn giờ
+dưới bundler. Bundler được phép sắp xếp lại thứ tự đánh giá module, và nó sẽ làm vậy khi module đó
+được nhiều entry point dùng chung.
+
+## 9. Đừng dựng mã QR 2FA bằng dịch vụ sinh QR online
+
+Chuỗi `otpauth://` chứa **chính bí mật TOTP**. Nhét nó vào URL của
+`api.qrserver.com`/`chart.googleapis.com` là gửi thẳng yếu tố thứ hai cho bên thứ ba, và để lại
+một bản sao trong log truy cập của họ — vĩnh viễn.
+
+**Fix**: vẽ QR ngay trong trình duyệt (`qrcode` → `<canvas>`), xem
+`src/app/security/two-factor-manager.tsx`. Bí mật không đi đâu ngoài đường nó vốn đã đi.
+
 ## Lưu ý chung khi code
 
 - **Ưu tiên `pnpm typecheck`/`pnpm test` qua terminal hơn tin theo IDE** khi vừa đổi

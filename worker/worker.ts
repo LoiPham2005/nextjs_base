@@ -73,7 +73,7 @@ export function startWorker(): WorkerHandle {
     "app",
     async (job: Job) => {
       const name = job.name as JobName;
-            /*
+      /*
        * Ép kiểu handler về `(payload: unknown) => Promise<void>`.
        *
        * `name` đến từ Redis dưới dạng chuỗi nên nó là HỢP của mọi tên job, và

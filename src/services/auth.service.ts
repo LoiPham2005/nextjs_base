@@ -30,7 +30,7 @@ import {
 import { sendPhoneOtpSms } from "@/lib/sms";
 import { isPhoneVerificationEnabled } from "@/lib/smser";
 import { rateLimit } from "@/lib/rate-limit";
-import { UserService, toPublicUser } from "./user.service";
+import { type UserService, toPublicUser } from "./user.service";
 import type { VerificationService } from "./verification.service";
 import type { TokenService } from "./token.service";
 import type { SecurityStampService } from "./security-stamp.service";
@@ -164,12 +164,7 @@ export class AuthService {
      */
     if (user.twoFactorEnabledAt) throw new TwoFactorRequiredError(user.id);
 
-    const {
-      password: _password,
-      failedLoginAttempts: _attempts,
-      lockedUntil: _locked,
-      ...rest
-    } = user;
+    const { password: _password, failedLoginAttempts: _attempts, ...rest } = user;
     return toPublicUser(rest);
   }
 

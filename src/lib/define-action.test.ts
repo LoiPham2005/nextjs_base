@@ -65,8 +65,10 @@ describe("defineAction", () => {
     await defineAction("role:update", vi.fn().mockResolvedValue({}))();
 
     // Kiểm theo QUYỀN, không phải theo tên vai trò — nhờ vậy vai trò tự tạo
-    // (KE_TOAN ở đây) vẫn dùng được action nếu được tick quyền tương ứng.
-    expect(permissionService.can).toHaveBeenCalledWith("KE_TOAN", "role:update");
+    // (KE_TOAN trong session ở đây) vẫn dùng được action nếu được tick quyền
+    // tương ứng. `can` nhận userId chứ không nhận vai trò: một người có thể
+    // mang nhiều vai trò cùng lúc, hợp quyền của chúng nằm dưới database.
+    expect(permissionService.can).toHaveBeenCalledWith(session.sub, "role:update");
   });
 
   it("không nuốt lỗi từ phần thân", async () => {

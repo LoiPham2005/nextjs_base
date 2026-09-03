@@ -5,11 +5,7 @@ import { logger } from "@/lib/logger";
 import { CryptoUtils } from "@/lib/crypto";
 import { decryptSecret, encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { createTotpSecret, verifyTotp } from "@/lib/totp";
-import {
-  generateRecoveryCode,
-  hashScopedToken,
-  normalizeRecoveryCode,
-} from "@/lib/opaque-token";
+import { generateRecoveryCode, hashScopedToken, normalizeRecoveryCode } from "@/lib/opaque-token";
 import {
   InvalidCredentialsError,
   InvalidTwoFactorCodeError,

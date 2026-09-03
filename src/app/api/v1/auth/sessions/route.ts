@@ -1,6 +1,8 @@
-import { requireApiUser } from "@/lib/api/auth";
+import { clientIp, requireApiUser } from "@/lib/api/auth";
 import { apiOk, handleApiError } from "@/lib/api/response";
 import { tokenService } from "@/services/token.service";
+import { auditService } from "@/services/audit.service";
+import { AUDIT_ACTIONS } from "@/schemas/audit.schema";
 
 export const dynamic = "force-dynamic";
 
@@ -44,5 +46,38 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     return handleApiError(error, { route: "GET /api/v1/auth/sessions", request });
+  }
+}
+
+/**
+ * Đăng xuất MỌI thiết bị khác — nút "đăng xuất khỏi tất cả thiết bị".
+ *
+ * Giữ lại phiên hiện tại: đăng xuất luôn chính người đang bấm nút thì họ phải
+ * đăng nhập lại ngay, và không ai muốn thế sau khi vừa xử lý một sự cố bảo mật.
+ * Phiên hiện tại nhận ra qua `sid` trong access token (`familyId`, ổn định qua
+ * mọi lần refresh).
+ */
+export async function DELETE(request: Request) {
+  try {
+    const session = await requireApiUser(request);
+
+    const revoked = await tokenService.revokeAllForUser(session.sub, {
+      ...(session.sid ? { exceptFamilyId: session.sid } : {}),
+    });
+
+    await auditService.record({
+      action: AUDIT_ACTIONS.SESSION_REVOKED,
+      entity: "user",
+      entityId: session.sub,
+      actorId: session.sub,
+      actorEmail: session.email,
+      metadata: { revoked, scope: "all_other_devices" },
+      ip: clientIp(request),
+      userAgent: request.headers.get("user-agent"),
+    });
+
+    return apiOk({ revoked });
+  } catch (error) {
+    return handleApiError(error, { route: "DELETE /api/v1/auth/sessions", request });
   }
 }

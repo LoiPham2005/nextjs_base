@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const user = await authService.register(body);
     logger.info("API register", { userId: user.id });
 
-    const tokens = await issueTokenPair(user, request.headers.get("user-agent"));
+    const tokens = await issueTokenPair(user, { userAgent: request.headers.get("user-agent") });
 
     return apiOk({ user, ...tokens }, 201);
   } catch (error) {

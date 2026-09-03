@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProviderNotConfiguredError } from "./errors";
 import { featureFlag } from "./feature-flag";
 
 /**
@@ -393,9 +394,19 @@ export function webAuthnConfig(): { rpID: string; rpName: string; origins: strin
   }
 
   if (!env.APP_URL) {
-    throw new Error(
-      "Không xác định được cấu hình passkey: đặt APP_URL, hoặc khai cả " +
-        "WEBAUTHN_RP_ID lẫn WEBAUTHN_ORIGINS.",
+    /*
+     * `ProviderNotConfiguredError` chứ không phải `Error` thường.
+     *
+     * Đây là lỗi CẤU HÌNH, và nó phải đi tới người vận hành với nguyên văn
+     * cách sửa. Ném `Error` thường thì `handleApiError` xếp nó vào nhánh cuối
+     * và trả 500 "Lỗi máy chủ. Vui lòng thử lại." — client cứ thử lại mãi
+     * trong khi thứ cần làm là sửa một dòng trong `.env`.
+     *
+     * Đặt ở ĐÂY, nguồn duy nhất của cấu hình, thay vì kiểm lại trước mỗi lần
+     * gọi: mỗi nơi gọi tự canh là sớm muộn cũng có một nơi quên.
+     */
+    throw new ProviderNotConfiguredError(
+      "passkey (thiếu APP_URL, hoặc cả WEBAUTHN_RP_ID lẫn WEBAUTHN_ORIGINS)",
     );
   }
 

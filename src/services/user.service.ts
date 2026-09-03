@@ -2,7 +2,13 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { SYSTEM_ROLES, isKnownPermission } from "@/lib/permissions";
 import { buildPaginationMeta, toPrismaPage, type Paginated } from "@/schemas/common.schema";
-import { type CreateUserInput, type ListUsersInput, type PublicUser, type UpdateProfileInput, type UpdateUserInput } from "@/schemas/user.schema";
+import {
+  type CreateUserInput,
+  type ListUsersInput,
+  type PublicUser,
+  type UpdateProfileInput,
+  type UpdateUserInput,
+} from "@/schemas/user.schema";
 import { CryptoUtils } from "@/lib/crypto";
 import {
   DuplicateFieldError,

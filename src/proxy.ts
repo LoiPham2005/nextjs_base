@@ -14,7 +14,7 @@ import { getRequestId, REQUEST_ID_HEADER } from "@/lib/request-id";
  */
 
 /** Prefix yêu cầu đã đăng nhập. */
-const PROTECTED_PREFIXES = ["/users", "/roles", "/sessions"];
+const PROTECTED_PREFIXES = ["/users", "/roles", "/sessions", "/security"];
 
 /** Trang chỉ dành cho khách; đã đăng nhập rồi thì không cần vào nữa. */
 const GUEST_ONLY_PATHS = ["/login", "/register"];

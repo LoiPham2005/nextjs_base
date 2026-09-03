@@ -10,11 +10,24 @@ const alias = {
   "server-only": path.resolve(rootDir, "./test/stubs/server-only.ts"),
 };
 
-/** Biến môi trường tối thiểu để `src/lib/env.ts` vượt qua validation. */
+/**
+ * Biến môi trường tối thiểu để `src/lib/env.ts` vượt qua validation.
+ *
+ * Nhiều service đọc `env` ngay lúc import module, nên thiếu một biến ở đây là
+ * cả file test đổ vỡ trước khi chạy tới `it()` đầu tiên — chứ không phải một
+ * test đỏ.
+ *
+ * `ENCRYPTION_KEY` và `PHONE_VERIFICATION_ENABLED` bật hai nhánh chỉ tồn tại
+ * khi đã cấu hình: mã hoá bí mật TOTP, và xác thực số điện thoại (mặc định TẮT
+ * vì SMS tốn tiền — xem `PHONE_VERIFICATION_ENABLED` trong `.env.example`).
+ */
 const testEnv = {
   NODE_ENV: "test",
   DATABASE_URL: "postgresql://test:test@localhost:5432/test",
   SESSION_SECRET: "test-session-secret-at-least-32-characters-long",
+  ENCRYPTION_KEY: "test-encryption-key-at-least-16-chars",
+  APP_URL: "http://localhost:3000",
+  PHONE_VERIFICATION_ENABLED: "1",
 } as const;
 
 export default defineConfig({

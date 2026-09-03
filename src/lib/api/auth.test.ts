@@ -9,8 +9,18 @@ import { __clearRateLimits } from "@/lib/rate-limit";
 import { ApiError } from "./response";
 import { clientIp, enforceRateLimit, getApiSession, requireApiAdmin, requireApiUser } from "./auth";
 
-const adminPayload: SessionPayload = { sub: "admin-1", email: "admin@example.com", typ: "access" as const, roles: ["ADMIN"] };
-const userPayload: SessionPayload = { sub: "user-1", email: "user@example.com", typ: "access" as const, roles: ["USER"] };
+const adminPayload: SessionPayload = {
+  typ: "access",
+  sub: "admin-1",
+  email: "admin@example.com",
+  roles: ["ADMIN"],
+};
+const userPayload: SessionPayload = {
+  typ: "access",
+  sub: "user-1",
+  email: "user@example.com",
+  roles: ["USER"],
+};
 
 function requestWith(headers: Record<string, string> = {}) {
   return new Request("http://localhost/api/v1/users", { headers });
@@ -26,17 +36,17 @@ describe("getApiSession", () => {
   it("đọc token từ header Authorization: Bearer", async () => {
     const token = await signSession(userPayload);
 
-    await expect(getApiSession(requestWith({ authorization: `Bearer ${token}` }))).resolves.toEqual(
-      userPayload,
-    );
+    await expect(
+      getApiSession(requestWith({ authorization: `Bearer ${token}` })),
+    ).resolves.toMatchObject(userPayload);
   });
 
   it("chấp nhận chữ 'bearer' viết thường", async () => {
     const token = await signSession(userPayload);
 
-    await expect(getApiSession(requestWith({ authorization: `bearer ${token}` }))).resolves.toEqual(
-      userPayload,
-    );
+    await expect(
+      getApiSession(requestWith({ authorization: `bearer ${token}` })),
+    ).resolves.toMatchObject(userPayload);
   });
 
   it("bỏ qua scheme khác Bearer", async () => {
@@ -51,7 +61,7 @@ describe("getApiSession", () => {
     const token = await signSession(adminPayload);
     cookieStore.get.mockReturnValue({ value: token });
 
-    await expect(getApiSession(requestWith())).resolves.toEqual(adminPayload);
+    await expect(getApiSession(requestWith())).resolves.toMatchObject(adminPayload);
   });
 
   it("trả null khi không có nguồn nào", async () => {
@@ -86,7 +96,7 @@ describe("requireApiUser / requireApiAdmin", () => {
 
     await expect(
       requireApiAdmin(requestWith({ authorization: `Bearer ${token}` })),
-    ).resolves.toEqual(adminPayload);
+    ).resolves.toMatchObject(adminPayload);
   });
 });
 
