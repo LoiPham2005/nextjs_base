@@ -77,6 +77,43 @@ export default tseslint.config(
     rules: { "no-console": "off" },
   },
 
+  /*
+   * RANH GIỚI TẦNG, ép bằng máy.
+   *
+   * Route handler và Server Action KHÔNG được chạm Prisma — mọi truy vấn đi
+   * qua `src/services/*.ts`. Không có luật này thì ranh giới chỉ là kỷ luật,
+   * và kỷ luật thì rò rỉ: mỗi lần "lần này query nhanh gọn thôi mà" là một
+   * chỗ nghiệp vụ nằm ngoài chỗ nó phải nằm, không test được và không tái
+   * dùng được cho worker hay REST API.
+   *
+   * Đây chính là thứ mà bộ khung monorepo mua được bằng cách tách package.
+   * Ở đây mua bằng 10 dòng cấu hình.
+   */
+  {
+    files: ["src/app/**/*.{ts,tsx}", "src/components/**/*.{ts,tsx}", "realtime/**/*.ts"],
+    ignores: ["**/*.test.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@/lib/prisma",
+              message:
+                "Route/Action không query database trực tiếp. Thêm method vào src/services/*.ts rồi gọi service.",
+            },
+            {
+              name: "@prisma/client",
+              importNames: ["PrismaClient"],
+              message:
+                "Chỉ src/services/* và src/lib/prisma.ts được dựng PrismaClient. Type Prisma thì import type là được.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // File test.
   {
     files: ["**/*.test.{ts,tsx}", "vitest.setup.ts", "test/**/*.ts"],

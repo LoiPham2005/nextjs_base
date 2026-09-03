@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { healthService } from "@/services/health.service";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 
@@ -38,24 +38,13 @@ function featureStatus() {
 }
 
 export async function GET() {
-  const startedAt = Date.now();
+  const database = await healthService.checkDatabase();
 
-  try {
-    await prisma.$queryRaw`SELECT 1`;
+  if (database.status === "down") {
+    logger.error("Health check thất bại: không nối được database");
 
-    return NextResponse.json(
-      {
-        status: "ok",
-        database: "up",
-        latencyMs: Date.now() - startedAt,
-        features: featureStatus(),
-        timestamp: new Date().toISOString(),
-      },
-      { headers: { "Cache-Control": "no-store" } },
-    );
-  } catch (error) {
-    logger.error("Health check failed", error);
-
+    // 503 chứ không phải 500: load balancer phải hiểu là "đừng gửi traffic
+    // vào đây nữa", không phải "request này lỗi".
     return NextResponse.json(
       {
         status: "error",
@@ -66,4 +55,15 @@ export async function GET() {
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
+
+  return NextResponse.json(
+    {
+      status: "ok",
+      database: "up",
+      latencyMs: database.latencyMs,
+      features: featureStatus(),
+      timestamp: new Date().toISOString(),
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
