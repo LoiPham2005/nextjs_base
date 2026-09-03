@@ -17,7 +17,7 @@ export async function GET(request: Request, { params }: RouteContext) {
     // Đọc được hồ sơ người khác cần quyền `user:read`; hồ sơ của chính mình
     // thì chỉ cần `profile:read:own`. Luật gói trong canActOnResource để không
     // bị chép lại — và chép sai — ở từng route.
-    const allowed = await permissionService.canActOnResource(session.role, id, session.sub, {
+    const allowed = await permissionService.canActOnResource(session.roles, id, session.sub, {
       any: "user:read",
       own: "profile:read:own",
     });
@@ -60,7 +60,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
     const body = await parseJsonBody(request, updateUserSchema);
 
-    const allowed = await permissionService.canActOnResource(session.role, id, session.sub, {
+    const allowed = await permissionService.canActOnResource(session.roles, id, session.sub, {
       any: "user:update",
       own: "profile:update:own",
     });
@@ -69,11 +69,11 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
     // Kiểm tra riêng và kiểm tra SAU, chỉ khi body thật sự đụng tới vai trò.
     // Đặt trước sẽ chặn cả những request chỉ đổi tên hiển thị.
-    if (body.roleKey !== undefined && !(await permissionService.can(session.role, "user:update"))) {
+    if (body.roleKeys !== undefined && !(await permissionService.can(session.sub, "user:update"))) {
       throw apiErrors.forbidden("Bạn không có quyền đổi vai trò");
     }
 
-    const user = await userService.update(id, body, session.sub);
+    const user = await userService.update(id, body, { actorId: session.sub });
 
     return apiOk({ user });
   } catch (error) {
@@ -90,7 +90,7 @@ export async function DELETE(request: Request, { params }: RouteContext) {
     // SelfDeletionError thành 409. Refresh token có onDelete: Cascade nên mọi
     // phiên của user này biến mất cùng lúc — xoá tài khoản mà token còn sống
     // được thì vô nghĩa.
-    await userService.delete(id, session.sub);
+    await userService.softDelete(id, session.sub);
 
     return apiOk({ id });
   } catch (error) {

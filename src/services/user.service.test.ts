@@ -1,281 +1,300 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Prisma } from "@prisma/client";
+import { describe, expect, it, vi } from "vitest";
+import type { PrismaClient } from "@prisma/client";
+import { UserService } from "./user.service";
 import {
-  RoleNotFoundError,
-  SelfDeletionError,
-  SelfStatusChangeError,
-  UserAlreadyExistsError,
-  UserNotFoundError,
-  UserService,
-} from "./user.service";
+  AccountBannedError,
+  AccountInactiveError,
+  assertLoginAllowed,
+  DuplicateFieldError,
+  InsufficientRoleLevelError,
+  SelfActionForbiddenError,
+  UnknownRoleKeyError,
+} from "@/lib/errors";
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    user: {
-      create: vi.fn(),
-      update: vi.fn(),
-      findMany: vi.fn(),
-      findFirst: vi.fn(),
-      findUnique: vi.fn(),
-      count: vi.fn(),
-    },
-    // Vai trò nằm trong database từ khi bỏ enum `Role`, nên mọi đường ghi user
-    // đều phải tra `roleId` trước.
-    role: { findUnique: vi.fn() },
-  },
-}));
-
-// bcrypt cost 12 tốn ~250ms mỗi lần gọi — quá đắt cho unit test.
-vi.mock("@/lib/crypto", () => ({
-  CryptoUtils: {
-    hashPassword: vi.fn().mockResolvedValue("hashed"),
-    comparePassword: vi.fn(),
-    fakeCompare: vi.fn(),
-  },
-}));
-
-// `delete()` (xoá mềm) thu hồi refresh token thay vì trông chờ cascade —
-// tách khỏi Prisma thật nên chỉ cần biết nó CÓ được gọi, không cần mô phỏng
-// bảng refresh_tokens ở đây.
-vi.mock("./token.service", () => ({
-  tokenService: { revokeAllForUser: vi.fn() },
-}));
-
-import { prisma } from "@/lib/prisma";
-import { tokenService } from "./token.service";
+const USER_ROW = {
+  id: "u1",
+  email: "a@b.com",
+  phone: null,
+  username: null,
+  status: "ACTIVE",
+  emailVerifiedAt: null,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  profile: { fullName: "Nguyễn A", avatarUrl: null },
+  userRoles: [{ role: { key: "USER" } }],
+};
 
 /**
- * `create`/`update` được gọi kèm `select` lồng cho quan hệ `role`, nên kiểu
- * Prisma sinh ra không khớp fixture rút gọn. Gói lại một chỗ.
+ * @param levels Bậc vai trò theo từng userId, cho các test leo thang đặc quyền.
+ * `userRole.findMany` trả về đúng bộ vai trò của người được hỏi.
  */
-function row(overrides: Record<string, unknown> = {}) {
+function createDb(
+  overrides: { user?: Record<string, unknown>; role?: Record<string, unknown> } = {},
+  levels: Record<string, number> = {},
+) {
   return {
-    id: "u-1",
-    email: "user@example.com",
-    username: "user",
-    fullName: "User",
-    emailVerifiedAt: null,
-    status: "ACTIVE",
-    createdAt: new Date("2026-01-01"),
-    updatedAt: new Date("2026-01-01"),
-    role: { key: "USER", name: "Người dùng" },
-    ...overrides,
-  } as never;
+    user: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
+      findUniqueOrThrow: vi.fn().mockResolvedValue(USER_ROW),
+      findMany: vi.fn().mockResolvedValue([USER_ROW]),
+      count: vi.fn().mockResolvedValue(1),
+      create: vi.fn().mockResolvedValue(USER_ROW),
+      update: vi.fn().mockResolvedValue(USER_ROW),
+      ...overrides.user,
+    },
+    role: {
+      findMany: vi.fn().mockResolvedValue([{ id: "r-user", key: "USER", level: 0 }]),
+      ...overrides.role,
+    },
+    userRole: {
+      deleteMany: vi.fn(),
+      createMany: vi.fn(),
+      findMany: vi.fn(({ where }: { where: { userId: string } }) => {
+        const level = levels[where.userId];
+        return Promise.resolve(level === undefined ? [] : [{ role: { level } }]);
+      }),
+    },
+    userProfile: { upsert: vi.fn() },
+    $transaction: vi.fn(async (arg: unknown) =>
+      typeof arg === "function" ? (arg as (tx: unknown) => unknown)(createTx()) : [],
+    ),
+  } as unknown as PrismaClient;
 }
-import { CryptoUtils } from "@/lib/crypto";
 
-function prismaError(code: string) {
-  return new Prisma.PrismaClientKnownRequestError("boom", {
-    code,
-    clientVersion: "test",
-  });
+function createTx() {
+  return {
+    user: { update: vi.fn().mockResolvedValue(USER_ROW) },
+    userRole: { deleteMany: vi.fn(), createMany: vi.fn() },
+    // `setStatus` thu hồi phiên ngay trong cùng transaction khi khoá tài khoản
+    // — khoá mà để phiên cũ sống tiếp thì việc khoá gần như vô nghĩa.
+    refreshToken: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  };
 }
 
-// `prisma.user.create` được khai báo kiểu theo cả model, kể cả khi service
-// dùng `select` để loại bỏ password. Mock vì thế phải khớp model đầy đủ.
-const sampleUser = row();
+const baseInput = { email: "a@b.com", status: "ACTIVE" as const };
 
 describe("UserService", () => {
-  let service: UserService;
-
-  beforeEach(() => {
-    service = new UserService();
-    vi.clearAllMocks();
-    // Vai trò mặc định luôn tồn tại; ca kiểm thử nào cần vai trò lạ thì tự
-    // ghi đè mock này.
-    vi.mocked(prisma.role.findUnique).mockResolvedValue({ id: "role_user" } as never);
-  });
-
   describe("create", () => {
-    it("tạo user và hash mật khẩu", async () => {
-      vi.mocked(prisma.user.create).mockResolvedValue(row({ email: "test@example.com" }));
+    it("băm mật khẩu, KHÔNG bao giờ lưu chuỗi gốc", async () => {
+      const db = createDb();
 
-      const user = await service.create({ email: "test@example.com", password: "secret123" });
+      await new UserService(db).create({ ...baseInput, password: "matkhau123" });
 
-      expect(CryptoUtils.hashPassword).toHaveBeenCalledWith("secret123");
-      expect(user.email).toBe("test@example.com");
-      // `role` được làm phẳng thành khoá dạng chuỗi trước khi rời service.
-      expect(user.role).toBe("USER");
-
-      // Kiểm tra cái thật sự quan trọng: query gửi xuống Prisma không hề chọn
-      // cột password, nên nó không thể rò ra ngoài service.
-      const callArgs = vi.mocked(prisma.user.create).mock.calls[0]?.[0];
-      expect(callArgs?.select).not.toHaveProperty("password");
-      expect(callArgs?.select).toMatchObject({ id: true, email: true });
+      const data = vi.mocked(db.user.create).mock.calls[0]![0]!.data as { password: string };
+      expect(data.password).not.toBe("matkhau123");
+      expect(data.password).toMatch(/^\$argon2id\$/);
     });
 
-    it("hạ email về chữ thường trước khi ghi", async () => {
-      vi.mocked(prisma.user.create).mockResolvedValue(row());
+    it("lưu password NULL — không phải chuỗi rỗng — khi không truyền mật khẩu", async () => {
+      // Chuỗi rỗng là một mật khẩu "hợp lệ" nhìn từ tầng dữ liệu; null mới nói
+      // đúng rằng tài khoản này chưa đặt mật khẩu.
+      const db = createDb();
 
-      await service.create({ email: "Loi@Example.COM" });
+      await new UserService(db).create(baseInput);
 
-      // Không chuẩn hoá thì `Loi@...` và `loi@...` thành hai tài khoản khác
-      // nhau, và người dùng không đăng nhập lại được vì gõ hoa chữ đầu.
-      expect(vi.mocked(prisma.user.create).mock.calls[0]?.[0]).toMatchObject({
-        data: { email: "loi@example.com" },
-      });
+      const data = vi.mocked(db.user.create).mock.calls[0]![0]!.data as { password: null };
+      expect(data.password).toBeNull();
     });
 
-    it("báo lỗi rõ ràng khi vai trò không tồn tại", async () => {
-      vi.mocked(prisma.role.findUnique).mockResolvedValue(null);
+    it("mặc định gán vai trò USER khi không chỉ định", async () => {
+      const db = createDb();
 
-      await expect(
-        service.create({ email: "test@example.com", roleKey: "KHONG_CO" }),
-      ).rejects.toThrow(RoleNotFoundError);
+      await new UserService(db).create(baseInput);
 
-      // Phải chặn TRƯỚC khi ghi, không để database ném lỗi khoá ngoại thô.
-      expect(prisma.user.create).not.toHaveBeenCalled();
-    });
-
-    it("lưu password null khi không truyền mật khẩu", async () => {
-      vi.mocked(prisma.user.create).mockResolvedValue(sampleUser);
-
-      await service.create({ email: "test@example.com" });
-
-      expect(CryptoUtils.hashPassword).not.toHaveBeenCalled();
-      expect(vi.mocked(prisma.user.create).mock.calls[0]?.[0]).toMatchObject({
-        data: { password: null },
-      });
-    });
-
-    it("đổi lỗi P2002 của Prisma thành UserAlreadyExistsError", async () => {
-      vi.mocked(prisma.user.create).mockRejectedValue(prismaError("P2002"));
-
-      await expect(service.create({ email: "dup@example.com" })).rejects.toThrow(
-        UserAlreadyExistsError,
+      expect(db.role.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { key: { in: ["USER"] } } }),
       );
     });
 
-    it("không nuốt lỗi lạ", async () => {
-      vi.mocked(prisma.user.create).mockRejectedValue(new Error("connection lost"));
+    it("từ chối vai trò không tồn tại thay vì lặng lẽ bỏ qua", async () => {
+      // Bỏ qua nghĩa là admin bấm "gán vai trò KE_TOAN", hệ thống báo thành
+      // công, mà người dùng không nhận được vai trò nào.
+      const db = createDb({ role: { findMany: vi.fn().mockResolvedValue([]) } });
 
-      await expect(service.create({ email: "x@example.com" })).rejects.toThrow("connection lost");
+      await expect(
+        new UserService(db).create({ ...baseInput, roleKeys: ["KE_TOAN"] }),
+      ).rejects.toBeInstanceOf(UnknownRoleKeyError);
+    });
+
+    it("báo đúng TRƯỜNG bị trùng, không phải lỗi chung chung", async () => {
+      const db = createDb({
+        user: {
+          findFirst: vi.fn().mockResolvedValue({ email: "a@b.com", username: null, phone: null }),
+        },
+      });
+
+      await expect(new UserService(db).create(baseInput)).rejects.toBeInstanceOf(
+        DuplicateFieldError,
+      );
+    });
+
+    it("không select cột password, nên nó không thể rò ra khỏi service", async () => {
+      const db = createDb();
+
+      const user = await new UserService(db).create(baseInput);
+
+      const select = vi.mocked(db.user.create).mock.calls[0]![0]!.select as Record<string, unknown>;
+      expect(select.password).toBeUndefined();
+      expect(user).not.toHaveProperty("password");
+    });
+
+    it("không nuốt lỗi lạ của database", async () => {
+      const db = createDb({
+        user: { create: vi.fn().mockRejectedValue(new Error("connection lost")) },
+      });
+
+      await expect(new UserService(db).create(baseInput)).rejects.toThrow("connection lost");
     });
   });
 
   describe("list", () => {
-    it("mặc định lấy 50 bản ghi — cộng dư 1 để biết còn trang sau", async () => {
-      vi.mocked(prisma.user.findMany).mockResolvedValue([]);
+    it("bỏ qua tài khoản đã xoá mềm theo mặc định", async () => {
+      const db = createDb();
 
-      await service.list();
+      await new UserService(db).list({ page: 1, limit: 20, includeDeleted: false });
 
-      expect(vi.mocked(prisma.user.findMany).mock.calls[0]?.[0]).toMatchObject({ take: 51 });
+      const args = vi.mocked(db.user.findMany).mock.calls[0]![0]!;
+      expect(args.where).toMatchObject({ deletedAt: null });
+      expect(args.take).toBe(20);
+      expect(args.skip).toBe(0);
     });
 
-    it("chặn trần ở 100 dù caller yêu cầu nhiều hơn", async () => {
-      vi.mocked(prisma.user.findMany).mockResolvedValue([]);
+    it("trả metadata phân trang khớp với tổng số bản ghi", async () => {
+      const db = createDb({ user: { count: vi.fn().mockResolvedValue(45) } });
 
-      await service.list({ take: 100_000 });
+      const page = await new UserService(db).list({ page: 2, limit: 20, includeDeleted: false });
 
-      expect(vi.mocked(prisma.user.findMany).mock.calls[0]?.[0]).toMatchObject({ take: 101 });
-    });
-
-    it("trả nextCursor khi còn dư dòng, cắt bớt dòng thừa khỏi kết quả", async () => {
-      const rows = Array.from({ length: 3 }, (_, i) => row({ id: `u-${i}` }));
-      vi.mocked(prisma.user.findMany).mockResolvedValue(rows);
-
-      const { users, nextCursor } = await service.list({ take: 2 });
-
-      expect(users).toHaveLength(2);
-      expect(nextCursor).toBe("u-1");
-    });
-
-    it("nextCursor = null khi hết dữ liệu", async () => {
-      vi.mocked(prisma.user.findMany).mockResolvedValue([row({ id: "u-0" })]);
-
-      const { users, nextCursor } = await service.list({ take: 2 });
-
-      expect(users).toHaveLength(1);
-      expect(nextCursor).toBeNull();
-    });
-
-    it("truyền cursor xuống Prisma kèm skip: 1 để bỏ qua chính dòng cursor", async () => {
-      vi.mocked(prisma.user.findMany).mockResolvedValue([]);
-
-      await service.list({ cursor: "u-5" });
-
-      expect(vi.mocked(prisma.user.findMany).mock.calls[0]?.[0]).toMatchObject({
-        cursor: { id: "u-5" },
-        skip: 1,
+      expect(page.meta).toMatchObject({
+        page: 2,
+        limit: 20,
+        total: 45,
+        totalPages: 3,
+        hasNext: true,
       });
     });
   });
 
-  describe("delete (xoá mềm)", () => {
-    it("đổi lỗi P2025 thành UserNotFoundError", async () => {
-      vi.mocked(prisma.user.update).mockRejectedValue(prismaError("P2025"));
-
-      await expect(service.delete("missing", "admin-1")).rejects.toThrow(UserNotFoundError);
-    });
-
-    // Luật nghiệp vụ nằm ở service nên MỌI cửa vào đều được bảo vệ, kể cả cửa
-    // chưa tồn tại. Trước đây nó bị chép lại ở Server Action và route handler.
-    it("chặn tự xoá chính mình, và không hề chạm tới database", async () => {
-      await expect(service.delete("u-1", "u-1")).rejects.toThrow(SelfDeletionError);
-
-      expect(prisma.user.update).not.toHaveBeenCalled();
-    });
-
-    it("set deletedAt, giải phóng email/username, và thu hồi refresh token", async () => {
-      vi.mocked(prisma.user.update).mockResolvedValue(sampleUser);
-
-      await service.delete("u-2", "admin-1");
-
-      const callArgs = vi.mocked(prisma.user.update).mock.calls[0]?.[0];
-      expect(callArgs).toMatchObject({
-        where: { id: "u-2", deletedAt: null },
-        data: { email: "deleted_u-2@deleted.invalid", username: null },
-      });
-      expect(callArgs?.data).toHaveProperty("deletedAt");
-      expect(tokenService.revokeAllForUser).toHaveBeenCalledWith("u-2");
-    });
-
-    it("actorId = null (tiến trình hệ thống) thì không bị chặn", async () => {
-      vi.mocked(prisma.user.update).mockResolvedValue(sampleUser);
-
-      await expect(service.delete("u-1", null)).resolves.toBeDefined();
-    });
-  });
-
-  describe("setStatus", () => {
-    it("chặn tự khoá/mở khoá chính mình", async () => {
-      await expect(service.setStatus("admin-1", "BANNED", "admin-1")).rejects.toThrow(
-        SelfStatusChangeError,
+  describe("chốt chặn leo thang đặc quyền", () => {
+    it("ADMIN không tạo được tài khoản SUPER_ADMIN", async () => {
+      /*
+       * Đây là đường leo thang rõ nhất, và chốt "không tự đổi vai trò của
+       * chính mình" KHÔNG cứu được: kẻ tấn công tạo một tài khoản KHÁC mang
+       * vai trò tối cao rồi đăng nhập vào đó.
+       */
+      const db = createDb(
+        {
+          role: {
+            findMany: vi.fn().mockResolvedValue([{ id: "r-sa", key: "SUPER_ADMIN", level: 100 }]),
+          },
+        },
+        { admin: 50 },
       );
-      expect(prisma.user.update).not.toHaveBeenCalled();
+
+      await expect(
+        new UserService(db).create({ ...baseInput, roleKeys: ["SUPER_ADMIN"], actorId: "admin" }),
+      ).rejects.toBeInstanceOf(InsufficientRoleLevelError);
     });
 
-    it("khoá tài khoản người khác", async () => {
-      vi.mocked(prisma.user.update).mockResolvedValue(row({ status: "BANNED" }));
+    it("ADMIN không gán được vai trò NGANG bậc mình", async () => {
+      // "Bằng" cũng bị chặn: cho phép ADMIN nhân bản ADMIN nghĩa là bậc đó
+      // tăng vô hạn và không ai gỡ được — vì ADMIN cũng không đụng được vào
+      // ADMIN khác.
+      const db = createDb(
+        {
+          role: { findMany: vi.fn().mockResolvedValue([{ id: "r-ad", key: "ADMIN", level: 50 }]) },
+        },
+        { admin: 50 },
+      );
 
-      const user = await service.setStatus("u-2", "BANNED", "admin-1");
-
-      expect(user.status).toBe("BANNED");
-      expect(vi.mocked(prisma.user.update).mock.calls[0]?.[0]).toMatchObject({
-        where: { id: "u-2", deletedAt: null },
-        data: { status: "BANNED" },
-      });
+      await expect(
+        new UserService(db).create({ ...baseInput, roleKeys: ["ADMIN"], actorId: "admin" }),
+      ).rejects.toBeInstanceOf(InsufficientRoleLevelError);
     });
 
-    it("đổi lỗi P2025 thành UserNotFoundError", async () => {
-      vi.mocked(prisma.user.update).mockRejectedValue(prismaError("P2025"));
+    it("ADMIN không sửa/khoá/xoá được tài khoản SUPER_ADMIN", async () => {
+      const db = createDb(
+        { user: { findFirst: vi.fn().mockResolvedValue({ id: "sa" }) } },
+        { admin: 50, sa: 100 },
+      );
+      const service = new UserService(db);
 
-      await expect(service.setStatus("missing", "BANNED", "admin-1")).rejects.toThrow(
-        UserNotFoundError,
+      await expect(
+        service.update("sa", { status: "BANNED" }, { actorId: "admin" }),
+      ).rejects.toBeInstanceOf(InsufficientRoleLevelError);
+
+      await expect(service.setStatus("sa", "BANNED", { actorId: "admin" })).rejects.toBeInstanceOf(
+        InsufficientRoleLevelError,
+      );
+
+      await expect(service.softDelete("sa", { actorId: "admin" })).rejects.toBeInstanceOf(
+        InsufficientRoleLevelError,
       );
     });
+
+    it("ADMIN không cấp/tước được quyền lẻ cho SUPER_ADMIN", async () => {
+      // Cấp quyền lẻ là một dạng đổi thẩm quyền — nếu không chịu cùng chốt
+      // chặn thì nó trở thành đường vòng quanh luật vai trò.
+      const db = createDb({}, { admin: 50, sa: 100 });
+
+      await expect(
+        new UserService(db).setUserPermission("sa", "user:delete", false, { actorId: "admin" }),
+      ).rejects.toBeInstanceOf(InsufficientRoleLevelError);
+    });
+
+    it("SUPER_ADMIN thao tác được lên ADMIN", async () => {
+      const db = createDb(
+        { user: { findFirst: vi.fn().mockResolvedValue({ id: "admin" }) } },
+        { sa: 100, admin: 50 },
+      );
+
+      await expect(
+        new UserService(db).setStatus("admin", "BANNED", { actorId: "sa" }),
+      ).resolves.toBeDefined();
+    });
+
+    it("thao tác của HỆ THỐNG (không có actor) không bị chặn", async () => {
+      // Seed, script, job nền — không có ai để so bậc, và bỏ qua là đúng.
+      const db = createDb({}, {});
+
+      await expect(
+        new UserService(db).create({ ...baseInput, roleKeys: ["USER"] }),
+      ).resolves.toBeDefined();
+    });
   });
 
-  describe("unlock", () => {
-    it("xoá bộ đếm sai mật khẩu và mốc khoá tạm", async () => {
-      vi.mocked(prisma.user.update).mockResolvedValue(sampleUser);
+  describe("chốt chặn tự bắn vào chân mình", () => {
+    it("không cho tự đổi vai trò của chính mình", async () => {
+      // Không có chốt này thì quản trị viên cuối cùng tự khoá mình ra ngoài chỉ
+      // bằng một cú bấm nhầm, và không còn ai vào sửa được.
+      const db = createDb({ user: { findFirst: vi.fn().mockResolvedValue({ id: "u1" }) } });
 
-      await service.unlock("u-1");
-
-      expect(vi.mocked(prisma.user.update).mock.calls[0]?.[0]).toMatchObject({
-        where: { id: "u-1", deletedAt: null },
-        data: { failedLoginAttempts: 0, lockedUntil: null },
-      });
+      await expect(
+        new UserService(db).update("u1", { roleKeys: ["USER"] }, { actorId: "u1" }),
+      ).rejects.toBeInstanceOf(SelfActionForbiddenError);
     });
+
+    it("không cho tự khoá và tự xoá chính mình", async () => {
+      const db = createDb();
+      const service = new UserService(db);
+
+      await expect(service.setStatus("u1", "BANNED", { actorId: "u1" })).rejects.toBeInstanceOf(
+        SelfActionForbiddenError,
+      );
+      await expect(service.softDelete("u1", { actorId: "u1" })).rejects.toBeInstanceOf(
+        SelfActionForbiddenError,
+      );
+    });
+  });
+});
+
+describe("assertLoginAllowed", () => {
+  it("chặn cả BANNED lẫn INACTIVE, cho ACTIVE đi qua", () => {
+    // Gom vào một hàm dùng chung cho cả ba đường đăng nhập (mật khẩu, OAuth,
+    // passkey). Bốn chỗ kiểm tra riêng lẻ là bốn cơ hội để một đường mới quên
+    // mất luật.
+    expect(() => assertLoginAllowed("ACTIVE")).not.toThrow();
+    expect(() => assertLoginAllowed("BANNED")).toThrow(AccountBannedError);
+    expect(() => assertLoginAllowed("INACTIVE")).toThrow(AccountInactiveError);
   });
 });

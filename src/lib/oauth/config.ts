@@ -1,4 +1,4 @@
-import { env } from "@/lib/env";
+import { env, publicAppUrl } from "@/lib/env";
 import { apiPath } from "@/lib/api/version";
 import type { OAuthProviderId } from "./types";
 
@@ -66,8 +66,8 @@ export function isProviderConfigured(provider: OAuthProviderId): boolean {
 
 /** redirect_uri phải TUYỆT ĐỐI và khớp 100% với cấu hình trên console của provider. */
 export function callbackUrl(provider: OAuthProviderId): string {
-  if (!env.NEXT_PUBLIC_APP_URL) {
+  if (!publicAppUrl) {
     throw new Error("NEXT_PUBLIC_APP_URL là bắt buộc để dùng đăng nhập OAuth");
   }
-  return `${env.NEXT_PUBLIC_APP_URL}${apiPath(`/auth/oauth/${provider}/callback`)}`;
+  return `${publicAppUrl}${apiPath(`/auth/oauth/${provider}/callback`)}`;
 }

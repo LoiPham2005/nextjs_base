@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as UserServiceModule from "@/services/user.service";
-import { SelfDeletionError, UsernameAlreadyExistsError } from "@/services/user.service";
+import { SelfDeletionError, UsernameAlreadyExistsError } from "@/lib/errors";
 
 /**
  * Đây là bài test quan trọng nhất trong repo.
@@ -86,14 +86,14 @@ describe("createUserAction", () => {
       emailVerifiedAt: null,
       status: "ACTIVE",
       lockedUntil: null,
-      role: "USER",
+      roles: "USER",
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
-    await createUserAction({}, form({ email: "new@example.com", role: "ADMIN" }));
+    await createUserAction({}, form({ email: "new@example.com", roles: "ADMIN" }));
 
-    expect(vi.mocked(userService.create).mock.calls[0]?.[0].roleKey).toBeUndefined();
+    expect(vi.mocked(userService.create).mock.calls[0]?.[0].roleKeys).toBeUndefined();
   });
 
   it("trả lỗi theo field khi email sai định dạng", async () => {
@@ -125,7 +125,7 @@ describe("createUserAction", () => {
       emailVerifiedAt: null,
       status: "ACTIVE",
       lockedUntil: null,
-      role: "USER",
+      roles: "USER",
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -201,7 +201,7 @@ describe("deleteUserAction", () => {
       emailVerifiedAt: null,
       status: "ACTIVE",
       lockedUntil: null,
-      role: "USER",
+      roles: "USER",
       createdAt: new Date(),
       updatedAt: new Date(),
     });

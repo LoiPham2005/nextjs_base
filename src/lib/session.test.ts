@@ -4,7 +4,7 @@ import { signSession, verifySession, type SessionPayload } from "./session";
 const payload: SessionPayload = {
   sub: "user-1",
   email: "user@example.com",
-  role: "ADMIN",
+  typ: "access" as const, roles: ["ADMIN"],
 };
 
 describe("session", () => {
@@ -25,7 +25,7 @@ describe("session", () => {
   it("từ chối token bị sửa nội dung", async () => {
     // Ký với quyền USER, rồi sửa payload thành ADMIN mà giữ nguyên chữ ký cũ.
     // Đây chính là cách leo thang đặc quyền nếu chữ ký không được kiểm.
-    const token = await signSession({ ...payload, role: "USER" });
+    const token = await signSession({ ...payload, typ: "access" as const, roles: ["USER"] });
     const [header, body, signature] = token.split(".");
 
     const tampered = JSON.parse(atob(body!)) as Record<string, unknown>;

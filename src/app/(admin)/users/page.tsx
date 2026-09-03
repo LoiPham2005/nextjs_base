@@ -21,18 +21,26 @@ const PER_PAGE = 20;
 export default async function UsersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cursor?: string }>;
+  searchParams: Promise<{ page?: string }>;
 }) {
   // Lớp bảo vệ ở tầng trang. Server Action còn tự kiểm tra lại một lần nữa —
   // xem `actions.ts` để biết vì sao không thể chỉ dựa vào chỗ này.
   const currentUser = await requirePermission("user:read", "/users");
 
-  const { cursor } = await searchParams;
+  const { page } = await searchParams;
 
-  const [{ users, nextCursor }, total] = await Promise.all([
-    userService.list({ cursor, take: PER_PAGE }),
-    userService.count(),
-  ]);
+  /*
+   * Phân trang theo TRANG, không phải page.
+   *
+   * `userService.list` trả cả `items` lẫn `meta` (tổng số, số trang, còn trang
+   * sau không) trong MỘT lần gọi — trước đây phải gọi thêm `count()` riêng, và
+   * hai truy vấn đó có thể thấy hai trạng thái khác nhau của bảng.
+   */
+  const { items: users, meta } = await userService.list({
+    page: Number(page) || 1,
+    limit: PER_PAGE,
+    includeDeleted: false,
+  });
 
   return (
     <>
@@ -52,7 +60,7 @@ export default async function UsersPage({
           </Link>
           <h1 className="page-title">Quản lý người dùng</h1>
         </div>
-        <span className="badge badge-primary">Tổng: {total}</span>
+        <span className="badge badge-primary">Tổng: {meta.total}</span>
       </div>
 
       <section className="card">
@@ -69,14 +77,14 @@ export default async function UsersPage({
           </div>
         ) : (
           <ul className="user-list">
-            {users.map((user) => (
+            {users.map((user: (typeof users)[number]) => (
               <li key={user.id} className="user-item">
                 <div className="user-info">
-                  <span className="user-email">{user.email}</span>
+                  <span className="user-email">{user.email ?? user.username ?? ""}</span>
                   <div className="user-meta">
                     {user.fullName && <span>👤 {user.fullName}</span>}
                     {user.username && <span>@{user.username}</span>}
-                    <span className="badge badge-success">{user.roleName}</span>
+                    <span className="badge badge-success">{user.roles.join(", ")}</span>
                     {user.status === "BANNED" && (
                       <span className="badge badge-danger">Đã khoá</span>
                     )}
@@ -94,11 +102,11 @@ export default async function UsersPage({
                   <div style={{ display: "flex", gap: 8 }}>
                     <UserStatusButton
                       id={user.id}
-                      email={user.email}
+                      email={user.email ?? user.username ?? ""}
                       status={user.status}
                       lockedUntil={user.lockedUntil?.toISOString() ?? null}
                     />
-                    <UserDeleteButton id={user.id} email={user.email} />
+                    <UserDeleteButton id={user.id} email={user.email ?? user.username ?? ""} />
                   </div>
                 )}
               </li>
@@ -113,11 +121,11 @@ export default async function UsersPage({
           mà offset thì lệch ngay khi có dòng chèn vào giữa — người dùng lật
           trang và thấy một bản ghi hai lần, hoặc bỏ sót một bản ghi.
 
-          Đổi lại, cursor không cho "Trang trước" miễn phí. Không sao: mỗi
+          Đổi lại, page không cho "Trang trước" miễn phí. Không sao: mỗi
           trang là một URL riêng, nên nút Back của trình duyệt chính là "trang
           trước" — hoạt động đúng, không cần code gì thêm.
         */}
-        {(cursor || nextCursor) && (
+        {(page || meta.hasNext) && (
           <div
             style={{
               display: "flex",
@@ -130,18 +138,18 @@ export default async function UsersPage({
             }}
           >
             <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-              {users.length} / {total} người dùng
+              {users.length} / {meta.total} người dùng
             </span>
 
             <div style={{ display: "flex", gap: 8 }}>
-              {cursor && (
+              {page && (
                 <Button asChild variant="outline" size="sm">
                   <Link href="/users">← Về đầu danh sách</Link>
                 </Button>
               )}
-              {nextCursor && (
+              {meta.hasNext && (
                 <Button asChild variant="outline" size="sm">
-                  <Link href={{ pathname: "/users", query: { cursor: nextCursor } }}>
+                  <Link href={{ pathname: "/users", query: { page: meta.hasNext } }}>
                     Trang sau →
                   </Link>
                 </Button>

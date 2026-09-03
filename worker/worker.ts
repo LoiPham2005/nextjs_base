@@ -2,7 +2,7 @@ import { createServer, type Server as HttpServer } from "node:http";
 import { Queue, Worker, type Job } from "bullmq";
 import { logger } from "@/lib/logger";
 import { jobHandlers } from "@/jobs/handlers";
-import type { JobName, JobPayloads } from "@/jobs/types";
+import type { JobName } from "@/jobs/types";
 import { workerEnv } from "./env";
 
 /**
@@ -73,7 +73,18 @@ export function startWorker(): WorkerHandle {
     "app",
     async (job: Job) => {
       const name = job.name as JobName;
-      const handler = jobHandlers[name];
+            /*
+       * Ép kiểu handler về `(payload: unknown) => Promise<void>`.
+       *
+       * `name` đến từ Redis dưới dạng chuỗi nên nó là HỢP của mọi tên job, và
+       * `jobHandlers[name]` có kiểu tham số là GIAO của mọi payload — một kiểu
+       * không giá trị nào thoả mãn. TypeScript không thu hẹp được vì `name` và
+       * `job.data` là hai giá trị độc lập.
+       *
+       * An toàn ở tầng chạy: `enqueue()` là hàm generic, nên payload sai kiểu
+       * bị chặn ngay lúc biên dịch ở phía ĐẨY job — chỗ duy nhất kiểm được thật.
+       */
+      const handler = jobHandlers[name] as ((payload: unknown) => Promise<void>) | undefined;
 
       if (!handler) {
         // Job lạ = phiên bản worker cũ hơn phiên bản web đang chạy. Ném lỗi để
@@ -83,7 +94,7 @@ export function startWorker(): WorkerHandle {
       }
 
       const startedAt = Date.now();
-      await handler(job.data as JobPayloads[JobName]);
+      await handler(job.data);
 
       logger.info("Job xong", {
         name,

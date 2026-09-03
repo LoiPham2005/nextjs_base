@@ -1,52 +1,65 @@
-import "@/lib/openapi/zod-openapi";
 import { z } from "zod";
-import { PERMISSIONS } from "@/lib/permissions";
+import { emptyToUndefined } from "@/schemas/common.schema";
+
+export const roleKeySchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .min(2, "Mã vai trò tối thiểu 2 ký tự")
+  .max(40)
+  // Viết HOA + gạch dưới là quy ước bắt buộc, không phải gợi ý: `role.key` bị
+  // so sánh bằng chuỗi ở nhiều nơi, và `"Admin"` vs `"ADMIN"` là hai vai trò
+  // khác nhau nhìn từ database.
+  .regex(/^[A-Z][A-Z0-9_]*$/, "Mã vai trò chỉ gồm CHỮ HOA, số và dấu gạch dưới");
 
 /**
- * Khoá vai trò do người dùng đặt.
+ * Bậc quyền lực. Cao hơn = mạnh hơn.
  *
- * Hẹp có chủ đích — CHỮ HOA, số và gạch dưới. Khoá này xuất hiện trong JWT,
- * trong log và trong các câu so sánh `role === "ADMIN"` của code, nên nó phải
- * dễ đọc bằng mắt và không có ký tự gây bất ngờ. Quy ước chữ hoa cũng giúp
- * phân biệt ngay với `name` (tên hiển thị, sửa thoải mái).
- */
-export const roleKeyInputSchema = z
-  .string()
-  .min(2, "Khoá vai trò tối thiểu 2 ký tự")
-  .max(50, "Khoá vai trò tối đa 50 ký tự")
-  .regex(/^[A-Z][A-Z0-9_]*$/, "Khoá vai trò chỉ gồm CHỮ HOA, số và dấu gạch dưới");
-
-export const roleNameSchema = z
-  .string()
-  .min(1, "Tên vai trò không được để trống")
-  .max(100, "Tên vai trò tối đa 100 ký tự");
-
-export const roleDescriptionSchema = z.string().max(500, "Mô tả tối đa 500 ký tự");
-
-/**
- * Danh sách quyền, ràng buộc theo hằng `PERMISSIONS` trong code.
+ * Thang của seed: USER 0 · STAFF 10 · MANAGER 20 · ADMIN 50 · SUPER_ADMIN 100.
+ * Chừa khoảng trống giữa các bậc để sau này chèn vai trò mới vào giữa mà không
+ * phải đánh số lại toàn bộ.
  *
- * Dùng `z.enum` chứ không phải `z.string()`: quyền không tồn tại phải bị bác
- * ngay ở biên, kèm tên trường cụ thể, thay vì đi sâu xuống service rồi mới lỗi.
+ * Trần 100 là có chủ đích: 100 dành riêng cho SUPER_ADMIN, và không ai tạo
+ * được vai trò ngang nó qua API (`RoleService` còn chặn thêm: không tạo được
+ * vai trò ở bậc ngang hoặc trên chính mình).
  */
-export const permissionListSchema = z.array(z.enum(PERMISSIONS));
+export const roleLevelSchema = z.coerce.number().int().min(0).max(100);
 
 export const createRoleSchema = z.object({
-  key: roleKeyInputSchema,
-  name: roleNameSchema,
-  description: roleDescriptionSchema.nullish(),
-  permissions: permissionListSchema.optional(),
+  key: roleKeySchema,
+  name: z.string().trim().min(1, "Tên vai trò không được để trống").max(100),
+  description: emptyToUndefined(z.string().max(255).optional()),
+  level: roleLevelSchema.default(0),
+  permissions: z.array(z.string()).default([]),
 });
-export type CreateRoleInputSchema = z.infer<typeof createRoleSchema>;
+export type CreateRoleInput = z.infer<typeof createRoleSchema>;
 
-/**
- * `key` cố ý KHÔNG có ở đây: nó nằm trong mọi JWT đang lưu hành, đổi là vô
- * hiệu hoá token của những người đang đăng nhập mà không báo gì.
- */
 export const updateRoleSchema = z.object({
-  name: roleNameSchema.optional(),
-  description: roleDescriptionSchema.nullish(),
-  /** Danh sách ĐẦY ĐỦ sau khi sửa — bỏ tick phải thực sự gỡ được quyền. */
-  permissions: permissionListSchema.optional(),
+  name: z.string().trim().min(1).max(100).optional(),
+  description: emptyToUndefined(z.string().max(255).optional()),
+  level: roleLevelSchema.optional(),
+  /**
+   * Danh sách quyền THAY THẾ toàn bộ, không phải thêm vào.
+   *
+   * Chọn kiểu thay thế vì màn phân quyền là một bảng tick: gửi nguyên trạng
+   * thái cuối cùng thì không có chỗ cho lệch pha giữa "quyền vừa bỏ tick" và
+   * "quyền chưa bao giờ có". Bỏ trống field = không đụng tới phân quyền.
+   */
+  permissions: z.array(z.string()).optional(),
 });
-export type UpdateRoleInputSchema = z.infer<typeof updateRoleSchema>;
+export type UpdateRoleInput = z.infer<typeof updateRoleSchema>;
+
+export const roleSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  level: z.number(),
+  isSystem: z.boolean(),
+  permissions: z.array(z.string()),
+  /** Số người đang mang vai trò này — cảnh báo trước khi xoá. */
+  userCount: z.number(),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+});
+export type Role = z.infer<typeof roleSchema>;

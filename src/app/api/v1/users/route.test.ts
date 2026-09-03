@@ -136,7 +136,7 @@ describe("POST /api/v1/users", () => {
       emailVerifiedAt: null,
       status: "ACTIVE",
       lockedUntil: null,
-      role: "ADMIN",
+      roles: "ADMIN",
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -147,6 +147,6 @@ describe("POST /api/v1/users", () => {
     });
 
     expect(response.status).toBe(201);
-    expect(vi.mocked(userService.create).mock.calls[0]?.[0].roleKey).toBe("ADMIN");
+    expect(vi.mocked(userService.create).mock.calls[0]?.[0].roleKeys).toBe("ADMIN");
   });
 });

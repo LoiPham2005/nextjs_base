@@ -45,35 +45,35 @@ export async function requireApiUser(request: Request): Promise<SessionPayload> 
 }
 
 /**
- * Ném ApiError 401 nếu chưa đăng nhập, 403 nếu không phải ADMIN.
+ * Ném ApiError 401 nếu chưa đăng nhập, 403 nếu không mang vai trò ADMIN.
  *
- * Kiểm tra theo VAI TRÒ. Khi câu hỏi là "được làm hành động gì", dùng
- * `requireApiPermission` — nó không phải sửa lại khi thêm vai trò mới.
+ * ⚠️ Kiểm theo VAI TRÒ, và vai trò đọc từ TOKEN. Chỉ dùng cho những chỗ mà độ
+ * trễ vài chục phút là chấp nhận được (ẩn/hiện menu). Khi câu hỏi là "được làm
+ * hành động gì", dùng `requireApiPermission` — nó tra database và không phải
+ * sửa lại khi khách hàng thêm vai trò mới.
  */
 export async function requireApiAdmin(request: Request): Promise<SessionPayload> {
   const session = await requireApiUser(request);
-  if (session.role !== "ADMIN") throw apiErrors.forbidden();
+  if (!session.roles.includes("ADMIN")) throw apiErrors.forbidden();
   return session;
 }
 
 /**
  * Ném ApiError 401 nếu chưa đăng nhập, 403 nếu thiếu quyền.
  *
- * ⚠️ Quyền được đọc từ `role` NẰM TRONG TOKEN, không phải từ database. Token
- * sống tối đa vài chục phút (xem ACCESS_TOKEN_TTL_MINUTES), nên có một cửa sổ
- * ngắn mà người vừa bị hạ quyền vẫn dùng được token cũ.
+ * Quyền LUÔN được tra lại từ database (có cache), KHÔNG đọc từ token. Ký quyền
+ * vào token nghĩa là sửa phân quyền không có tác dụng cho tới khi token hết hạn
+ * — người vừa bị tước quyền vẫn thao tác thêm được, đúng lúc cần chặn ngay.
  *
- * Đánh đổi này là cố ý: kiểm tra ở đây chạy trên MỌI request API, đọc database
- * mỗi lần là tự thêm một truy vấn vào đường đi nóng. Với thao tác nhạy cảm —
- * xoá dữ liệu, chuyển tiền, đổi quyền người khác — hãy đọc lại `role` từ
- * database trong chính route đó thay vì tin vào token.
+ * Cái giá là một lần đọc cache mỗi request có yêu cầu quyền; `permissionService`
+ * dùng Redis khi có `REDIS_URL`, RAM khi không.
  */
 export async function requireApiPermission(
   request: Request,
   permission: Permission,
 ): Promise<SessionPayload> {
   const session = await requireApiUser(request);
-  if (!(await permissionService.can(session.role, permission))) throw apiErrors.forbidden();
+  if (!(await permissionService.can(session.sub, permission))) throw apiErrors.forbidden();
   return session;
 }
 

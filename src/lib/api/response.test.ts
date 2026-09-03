@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { InvalidCredentialsError } from "@/services/auth.service";
-import { RefreshTokenReuseError } from "@/services/token.service";
-import { UserAlreadyExistsError, UserNotFoundError } from "@/services/user.service";
 import { ApiError, apiErrors, apiOk, handleApiError, parseJsonBody } from "./response";
+import {
+  DuplicateFieldError,
+  InvalidCredentialsError,
+  RefreshTokenReuseError,
+  UserNotFoundError,
+} from "@/lib/errors";
 
 type ErrorBody = { error: { code: string; message: string; fields?: Record<string, string[]> } };
 
@@ -31,7 +34,7 @@ describe("apiOk", () => {
 describe("handleApiError", () => {
   it("ánh xạ lỗi nghiệp vụ sang đúng status", async () => {
     const cases = [
-      { error: new UserAlreadyExistsError("a@b.com"), status: 409, code: "CONFLICT" },
+      { error: new DuplicateFieldError("email", "a@b.com"), status: 409, code: "CONFLICT" },
       { error: new UserNotFoundError("x"), status: 404, code: "NOT_FOUND" },
       { error: new InvalidCredentialsError(), status: 401, code: "UNAUTHENTICATED" },
       { error: new RefreshTokenReuseError("u-1"), status: 401, code: "UNAUTHENTICATED" },

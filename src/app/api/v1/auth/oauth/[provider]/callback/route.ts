@@ -4,6 +4,7 @@ import { logger } from "@/lib/logger";
 import { exchangeCodeForToken } from "@/lib/oauth/client";
 import { consumeOAuthFlowCookie } from "@/lib/oauth/flow-cookie";
 import { fetchOAuthProfile, type AppleFormPostUser } from "@/lib/oauth/profile";
+import { AccountBannedError, InvalidCredentialsError } from "@/lib/errors";
 import {
   OAuthEmailRequiredError,
   OAuthExchangeError,
@@ -11,7 +12,6 @@ import {
   OAuthStateMismatchError,
   isOAuthProviderId,
 } from "@/lib/oauth/types";
-import { AccountBannedError, InvalidCredentialsError } from "@/services/auth.service";
 import { oauthService } from "@/services/oauth.service";
 
 export const dynamic = "force-dynamic";
@@ -70,7 +70,7 @@ async function handleCallback(
     const profile = await fetchOAuthProfile(provider, tokens, payload.appleUser);
     const user = await oauthService.loginWithProfile(profile);
 
-    await createSession({ sub: user.id, email: user.email, role: user.role });
+    await createSession({ sub: user.id, email: user.email, role: user.roles.join(", ") });
     logger.info("OAuth login", { userId: user.id, provider });
 
     return NextResponse.redirect(new URL(flow.next, request.url));

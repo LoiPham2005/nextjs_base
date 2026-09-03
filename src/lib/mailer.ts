@@ -1,37 +1,32 @@
-import "server-only";
-import { env, isProduction } from "./env";
-import { logger } from "./logger";
+import { env, isProduction } from "@/lib/env";
+import { logger } from "@/lib/logger";
 
 /**
  * Lớp gửi email.
  *
  * ---
- * VÌ SAO KHÔNG CHỌN SẴN NHÀ CUNG CẤP
+ * BA BẢN CÀI ĐẶT, CHỌN TỰ ĐỘNG
  *
- * Đây là bộ khung dùng cho nhiều dự án, mà mỗi dự án lại bị ràng buộc khác nhau:
- * có nơi bắt buộc dùng SMTP nội bộ của khách, có nơi dùng Resend hoặc SES, có
- * nơi khách đã mua sẵn dịch vụ khác. Cắm cứng một nhà cung cấp vào đây chỉ tạo
- * ra việc phải gỡ ra.
+ *   1. Có `SMTP_HOST`  → gửi thật qua SMTP (nodemailer).
+ *   2. Không, và đang DEV → ghi nội dung ra log. Lập trình viên lấy được link
+ *      xác thực mà không phải dựng máy chủ mail.
+ *   3. Không, và đang PRODUCTION → **NÉM LỖI**.
  *
- * Thay vào đó: một interface hẹp, và một bản cài đặt mặc định ghi ra log cho
- * môi trường dev. Cắm nhà cung cấp thật = viết một object thoả `Mailer` rồi
- * truyền vào `setMailer()` ở nơi khởi động ứng dụng.
+ * Vế cuối là phần quan trọng nhất. Im lặng nuốt email trên production nghĩa là
+ * người dùng bấm "quên mật khẩu", hệ thống báo thành công, mà thư không bao giờ
+ * tới — và không dòng log nào nói rằng có thứ đã bị bỏ qua.
  *
  * ---
- * VÌ SAO BẢN MẶC ĐỊNH GHI LOG THAY VÌ NÉM LỖI
+ * DÙNG NHÀ CUNG CẤP KHÁC (Resend / SES / Postmark)
  *
- * Ở môi trường dev, lập trình viên cần thấy được đường link trong luồng xác
- * thực email mà không phải dựng hạ tầng gửi thư. Ném lỗi sẽ chặn cả luồng.
- *
- * Nhưng trên production thì im lặng nuốt email là hành vi nguy hiểm — người
- * dùng bấm "quên mật khẩu", hệ thống báo thành công, mà thư không bao giờ tới.
- * Nên ở production, bản mặc định ném lỗi để buộc phải cấu hình thật.
+ * Viết một object thoả `Mailer` rồi gọi `setMailer()` lúc khởi động ứng dụng
+ * (`apps/api/src/main.ts`). Không cần sửa file này.
  */
 
 export type MailMessage = {
   to: string;
   subject: string;
-  /** Nội dung dạng chữ thuần. Bắt buộc — mọi trình đọc thư đều hiển thị được. */
+  /** Nội dung chữ thuần. BẮT BUỘC — mọi trình đọc thư đều hiển thị được. */
   text: string;
   html?: string;
 };
@@ -40,27 +35,22 @@ export type Mailer = {
   send(message: MailMessage): Promise<void>;
 };
 
-/**
- * Bản mặc định: ghi nội dung ra log ở dev, ném lỗi ở production.
- *
- * Cố ý ghi cả phần `text` — link xác thực nằm trong đó, và đó chính là thứ lập
- * trình viên cần lấy ra khi chạy máy cục bộ.
- */
+/** Ghi ra log ở dev, ném lỗi ở production. */
 const consoleMailer: Mailer = {
-  // Không khai báo `async`: thân hàm không chờ gì cả. Trả Promise trực tiếp
-  // vừa đúng kiểu `Mailer`, vừa nói thật rằng ở đây không có thao tác bất đồng
-  // bộ nào.
+  // Không khai báo `async`: thân hàm không chờ gì cả.
   send(message) {
     if (isProduction) {
       return Promise.reject(
         new Error(
-          "Chưa cấu hình Mailer. Gọi setMailer() với một nhà cung cấp thật " +
-            "(Resend / SES / SMTP) ở nơi khởi động ứng dụng trước khi chạy production.",
+          "Chưa cấu hình gửi email. Đặt SMTP_HOST trong .env, hoặc gọi setMailer() " +
+            "với một nhà cung cấp thật (Resend/SES/Postmark) lúc khởi động ứng dụng.",
         ),
       );
     }
 
-    logger.info("[mailer:dev] Email không được gửi thật", {
+    // Ghi cả phần `text` có chủ đích: link xác thực nằm trong đó, và đó chính
+    // là thứ lập trình viên cần lấy ra khi chạy máy cục bộ.
+    logger.info("[mailer:dev] Email KHÔNG được gửi thật", {
       from: env.MAIL_FROM ?? "(chưa đặt MAIL_FROM)",
       to: message.to,
       subject: message.subject,
@@ -71,7 +61,47 @@ const consoleMailer: Mailer = {
   },
 };
 
-let currentMailer: Mailer = consoleMailer;
+/**
+ * Gửi qua SMTP. `nodemailer` được nạp động để dự án không dùng email không
+ * phải mang thư viện này vào bộ nhớ.
+ */
+function createSmtpMailer(host: string): Mailer {
+  let transportPromise: Promise<{ sendMail(options: unknown): Promise<unknown> }> | null = null;
+
+  async function getTransport() {
+    transportPromise ??= (async () => {
+      const nodemailer = await import("nodemailer");
+      const transport = nodemailer.createTransport({
+        host,
+        port: env.SMTP_PORT,
+        // `secure: true` = TLS ngay từ đầu (cổng 465). Cổng 587 dùng STARTTLS
+        // nên phải để false — đặt sai là kết nối treo cho tới khi timeout.
+        secure: env.SMTP_SECURE,
+        auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD } : undefined,
+      });
+
+      logger.info("Mailer: dùng SMTP", { host, port: env.SMTP_PORT });
+      return transport;
+    })();
+
+    return transportPromise;
+  }
+
+  return {
+    async send(message) {
+      const transport = await getTransport();
+      await transport.sendMail({
+        from: env.MAIL_FROM ?? env.SMTP_USER,
+        to: message.to,
+        subject: message.subject,
+        text: message.text,
+        html: message.html,
+      });
+    },
+  };
+}
+
+let currentMailer: Mailer | null = null;
 
 /** Cắm nhà cung cấp thật. Gọi một lần lúc khởi động ứng dụng. */
 export function setMailer(mailer: Mailer): void {
@@ -79,5 +109,11 @@ export function setMailer(mailer: Mailer): void {
 }
 
 export function getMailer(): Mailer {
+  currentMailer ??= env.SMTP_HOST ? createSmtpMailer(env.SMTP_HOST) : consoleMailer;
   return currentMailer;
+}
+
+/** `true` khi email thật sự được gửi đi (không phải chỉ ghi log). */
+export function isMailerConfigured(): boolean {
+  return Boolean(env.SMTP_HOST) || currentMailer !== null;
 }

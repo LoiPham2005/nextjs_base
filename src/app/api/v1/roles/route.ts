@@ -1,6 +1,6 @@
 import { requireApiPermission } from "@/lib/api/auth";
 import { apiOk, handleApiError, parseJsonBody } from "@/lib/api/response";
-import { PERMISSIONS, PERMISSION_DESCRIPTIONS } from "@/lib/permissions";
+import { PERMISSIONS, PERMISSION_METADATA } from "@/lib/permissions";
 import { createRoleSchema } from "@/schemas/role.schema";
 import { roleService } from "@/services/role.service";
 
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
       roles,
       permissions: PERMISSIONS.map((key) => ({
         key,
-        description: PERMISSION_DESCRIPTIONS[key],
+        description: PERMISSION_METADATA[key],
       })),
     });
   } catch (error) {

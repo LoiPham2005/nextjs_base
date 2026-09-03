@@ -1,154 +1,214 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PrismaClient } from "@prisma/client";
 import { PermissionService } from "./permission.service";
-
-vi.mock("@/lib/prisma", () => ({
-  prisma: { role: { findMany: vi.fn() } },
-}));
-
-import { prisma } from "@/lib/prisma";
+import { __clearCache } from "@/lib/cache";
 
 /**
- * `findMany` được gọi kèm `select` lồng, nên kiểu Prisma sinh ra không khớp
- * với fixture rút gọn. Gói lại một chỗ thay vì rải ép kiểu khắp file.
+ * Không cần database thật: chỉ giả lập đúng một truy vấn mà service gọi.
+ *
+ * Kiểu `PrismaClient` được ép ở biên — bên trong test ta chỉ khai những field
+ * thực sự được đọc, thay vì dựng một bản sao đầy đủ của Prisma.
  */
-function mockRoles(rows: unknown[]) {
-  vi.mocked(prisma.role.findMany).mockResolvedValue(rows as never);
-}
-
-/** Dựng dữ liệu đúng hình dạng mà `load()` truy vấn. */
-function roleRow(key: string, permissionKeys: string[]) {
+function createDb(user: unknown) {
   return {
-    key,
-    permissions: permissionKeys.map((permissionKey) => ({
-      permission: { key: permissionKey },
-    })),
-  };
+    user: { findFirst: vi.fn().mockResolvedValue(user) },
+  } as unknown as PrismaClient;
 }
 
-const DEFAULT_ROWS = [
-  roleRow("ADMIN", ["user:read", "user:delete", "profile:read:own"]),
-  roleRow("USER", ["profile:read:own", "profile:update:own"]),
-];
-
-describe("PermissionService.can", () => {
-  let service: PermissionService;
-
-  beforeEach(() => {
-    service = new PermissionService();
-    vi.clearAllMocks();
-    mockRoles(DEFAULT_ROWS);
-  });
-
-  it("trả về đúng quyền của từng vai trò", async () => {
-    expect(await service.can("ADMIN", "user:delete")).toBe(true);
-    expect(await service.can("USER", "user:delete")).toBe(false);
-    expect(await service.can("USER", "profile:read:own")).toBe(true);
-  });
-
-  it("vai trò không tồn tại thì không có quyền nào", async () => {
-    // Vai trò bị xoá khỏi database nhưng token cũ vẫn mang khoá đó. Phải trả
-    // về tập rỗng, tuyệt đối không được coi là "chưa cấu hình nên cho qua".
-    expect(await service.can("KHONG_TON_TAI", "user:read")).toBe(false);
-    expect((await service.permissionsFor("KHONG_TON_TAI")).size).toBe(0);
-  });
-
-  it("bỏ qua quyền có trong database nhưng không còn trong code", async () => {
-    mockRoles([roleRow("ADMIN", ["user:read", "quyen:da:bi:xoa"])]);
-
-    const granted = await service.permissionsFor("ADMIN");
-
-    expect(granted.has("user:read")).toBe(true);
-    expect(granted.size).toBe(1);
-  });
+const roleWith = (...keys: string[]) => ({
+  role: { permissions: keys.map((key) => ({ permission: { key } })) },
 });
 
-describe("PermissionService — cache", () => {
-  let service: PermissionService;
-
-  beforeEach(() => {
-    service = new PermissionService();
-    vi.clearAllMocks();
-    mockRoles(DEFAULT_ROWS);
+describe("PermissionService", () => {
+  beforeEach(async () => {
+    // Cache dùng chung giữa các test — không dọn thì test sau đọc kết quả của
+    // test trước và pass/fail theo thứ tự chạy.
+    await __clearCache();
   });
 
-  it("chỉ truy vấn database một lần cho nhiều lần kiểm tra", async () => {
-    await service.can("ADMIN", "user:read");
-    await service.can("USER", "profile:read:own");
-    await service.can("ADMIN", "user:delete");
+  it("gộp quyền từ NHIỀU vai trò", async () => {
+    const db = createDb({
+      userRoles: [roleWith("user:read"), roleWith("role:read", "audit:read")],
+      userPermissions: [],
+    });
 
-    expect(prisma.role.findMany).toHaveBeenCalledOnce();
+    const permissions = await new PermissionService(db).permissionsFor("u1");
+
+    expect([...permissions].sort()).toEqual(["audit:read", "role:read", "user:read"]);
   });
 
-  it("gộp các lần nạp đồng thời thành một truy vấn", async () => {
-    // Không gộp thì mọi request đến cùng lúc cache hết hạn đều bắn truy vấn —
-    // đúng vào thời điểm hệ thống đang tải cao nhất.
-    await Promise.all([
-      service.can("ADMIN", "user:read"),
-      service.can("USER", "user:read"),
-      service.can("ADMIN", "user:delete"),
-    ]);
+  it("quyền cấp riêng cho cá nhân được cộng thêm", async () => {
+    const db = createDb({
+      userRoles: [roleWith("user:read")],
+      userPermissions: [{ isGranted: true, permission: { key: "user:delete" } }],
+    });
 
-    expect(prisma.role.findMany).toHaveBeenCalledOnce();
+    const service = new PermissionService(db);
+
+    expect(await service.can("u1", "user:delete")).toBe(true);
   });
 
-  it("nạp lại sau khi invalidate", async () => {
-    await service.can("ADMIN", "user:read");
-    service.invalidate();
-    await service.can("ADMIN", "user:read");
+  it("TƯỚC quyền cá nhân thắng mọi vai trò", async () => {
+    // Đây là luật quan trọng nhất của lớp này: cần chặn gấp một người khỏi một
+    // hành động thì phải chặn được ngay, không phải đi dựng lại vai trò.
+    const db = createDb({
+      userRoles: [roleWith("user:read", "user:delete")],
+      userPermissions: [{ isGranted: false, permission: { key: "user:delete" } }],
+    });
 
-    expect(prisma.role.findMany).toHaveBeenCalledTimes(2);
+    const service = new PermissionService(db);
+
+    expect(await service.can("u1", "user:read")).toBe(true);
+    expect(await service.can("u1", "user:delete")).toBe(false);
   });
 
-  it("thấy được thay đổi phân quyền sau khi invalidate", async () => {
-    expect(await service.can("USER", "user:read")).toBe(false);
+  it("bỏ qua quyền không còn tồn tại trong code", async () => {
+    // Một dòng cũ sót lại trong database không được phép cấp quyền, vì không
+    // còn dòng mã nào kiểm tra nó.
+    const db = createDb({
+      userRoles: [roleWith("user:read", "quyen:da:bi:xoa")],
+      userPermissions: [],
+    });
 
-    mockRoles([roleRow("USER", ["user:read"])]);
+    const permissions = await new PermissionService(db).permissionsFor("u1");
 
-    // Chưa invalidate thì vẫn đọc từ cache — đây là hành vi đúng, và cũng là
-    // lý do mọi thao tác ghi phân quyền BẮT BUỘC phải gọi invalidate().
-    expect(await service.can("USER", "user:read")).toBe(false);
-
-    service.invalidate();
-    expect(await service.can("USER", "user:read")).toBe(true);
-  });
-});
-
-describe("PermissionService — canAny / canAll / canActOnResource", () => {
-  let service: PermissionService;
-
-  beforeEach(() => {
-    service = new PermissionService();
-    vi.clearAllMocks();
-    mockRoles(DEFAULT_ROWS);
+    expect([...permissions]).toEqual(["user:read"]);
   });
 
-  it("canAny đúng khi có ít nhất một quyền", async () => {
-    expect(await service.canAny("USER", ["user:delete", "profile:read:own"])).toBe(true);
-    expect(await service.canAny("USER", ["user:delete", "user:read"])).toBe(false);
+  it("người dùng không tồn tại có tập quyền rỗng, không ném lỗi", async () => {
+    const service = new PermissionService(createDb(null));
+
+    expect([...(await service.permissionsFor("khong-co"))]).toEqual([]);
+    expect(await service.can("khong-co", "user:read")).toBe(false);
   });
 
-  it("canAll chỉ đúng khi có đủ mọi quyền", async () => {
-    expect(await service.canAll("USER", ["profile:read:own", "profile:update:own"])).toBe(true);
-    expect(await service.canAll("USER", ["profile:read:own", "user:read"])).toBe(false);
+  it("canAll cần đủ mọi quyền, canAny chỉ cần một", async () => {
+    const db = createDb({ userRoles: [roleWith("user:read")], userPermissions: [] });
+    const service = new PermissionService(db);
+
+    expect(await service.canAny("u1", ["user:read", "user:delete"])).toBe(true);
+    expect(await service.canAll("u1", ["user:read", "user:delete"])).toBe(false);
   });
 
-  it("danh sách rỗng: canAny false, canAll true", async () => {
-    // Quy ước toán học chuẩn. Ghi lại thành test để không ai "sửa cho hợp lý"
-    // rồi vô tình mở toang một endpoint đang truyền vào mảng rỗng.
-    expect(await service.canAny("ADMIN", [])).toBe(false);
-    expect(await service.canAll("USER", [])).toBe(true);
+  it("cache: lần gọi thứ hai không chạm database nữa", async () => {
+    const db = createDb({ userRoles: [roleWith("user:read")], userPermissions: [] });
+    const service = new PermissionService(db);
+
+    await service.permissionsFor("u1");
+    await service.permissionsFor("u1");
+
+    expect(db.user.findFirst).toHaveBeenCalledTimes(1);
   });
 
-  it("canActOnResource: ADMIN thao tác được trên dữ liệu người khác", async () => {
-    const perms = { any: "user:read", own: "profile:read:own" } as const;
+  it("invalidateUser buộc lần sau đọc lại từ database", async () => {
+    // Quên gọi hàm này sau khi đổi vai trò thì thay đổi chỉ có hiệu lực sau khi
+    // TTL hết — người quản trị thử lại ngay, thấy chưa đổi, và tưởng hỏng.
+    const db = createDb({ userRoles: [roleWith("user:read")], userPermissions: [] });
+    const service = new PermissionService(db);
 
-    expect(await service.canActOnResource("ADMIN", "owner-1", "admin-1", perms)).toBe(true);
+    await service.permissionsFor("u1");
+    await service.invalidateUser("u1");
+    await service.permissionsFor("u1");
+
+    expect(db.user.findFirst).toHaveBeenCalledTimes(2);
   });
 
-  it("canActOnResource: USER chỉ thao tác được trên dữ liệu của mình", async () => {
-    const perms = { any: "user:read", own: "profile:read:own" } as const;
+  it("lọc ngoại lệ ĐÃ HẾT HẠN ngay trong truy vấn", async () => {
+    /*
+     * Lọc ở tầng database chứ không ở tầng ứng dụng: mọi nơi hỏi "người này có
+     * quyền gì" đều đi qua đúng câu truy vấn này, nên không có đường nào quên.
+     *
+     * Một quyền tạm còn hiệu lực sau khi hết hạn là đúng thứ mà cột `expiresAt`
+     * sinh ra để ngăn — và nó hỏng trong im lặng, không ai phát hiện cho tới
+     * lúc kiểm toán.
+     */
+    const db = createDb({ userRoles: [], userPermissions: [] });
 
-    expect(await service.canActOnResource("USER", "u-1", "u-1", perms)).toBe(true);
-    expect(await service.canActOnResource("USER", "u-2", "u-1", perms)).toBe(false);
+    await new PermissionService(db).permissionsFor("u1");
+
+    const args = vi.mocked(db.user.findFirst).mock.calls[0]![0]! as {
+      select: { userPermissions: { where: unknown } };
+    };
+
+    expect(args.select.userPermissions.where).toEqual({
+      OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+    });
+  });
+
+  it("explainFor: nói rõ quyền đến từ ĐÂU", async () => {
+    /*
+     * `permissionsFor()` trả lời "được làm gì" — đủ để quyết định, không đủ để
+     * GIẢI THÍCH. Khi có ngoại lệ cá nhân, câu hỏi thật của bộ phận hỗ trợ là
+     * "vì sao tài khoản này xoá được người dùng?".
+     */
+    const db = createDb({
+      userRoles: [
+        { role: { key: "ADMIN", permissions: [{ permission: { key: "user:read" } }] } },
+        { role: { key: "STAFF", permissions: [{ permission: { key: "user:read" } }] } },
+      ],
+      userPermissions: [
+        {
+          isGranted: true,
+          grantedBy: "admin-1",
+          expiresAt: null,
+          permission: { key: "user:delete" },
+        },
+        {
+          isGranted: false,
+          grantedBy: "admin-1",
+          expiresAt: null,
+          permission: { key: "audit:read" },
+        },
+      ],
+    });
+
+    const explain = await new PermissionService(db).explainFor("u1");
+    const byKey = new Map(explain.map((item) => [item.key, item]));
+
+    // Đến từ hai vai trò — giữ CẢ HAI, vì "gỡ vai trò nào thì mất quyền này"
+    // là câu hỏi tiếp theo của người tra.
+    expect(byKey.get("user:read")).toMatchObject({
+      source: "role",
+      roles: ["ADMIN", "STAFF"],
+    });
+
+    expect(byKey.get("user:delete")).toMatchObject({ source: "grant", grantedBy: "admin-1" });
+    expect(byKey.get("audit:read")).toMatchObject({ source: "denied" });
+  });
+
+  it("explainFor: ngoại lệ HẾT HẠN không còn đè lên vai trò", async () => {
+    // Quyền quay về đúng những gì vai trò cho, nhưng vẫn ghi nhận "đã từng cấp"
+    // để người tra hiểu vì sao có dấu vết trong nhật ký.
+    const db = createDb({
+      userRoles: [{ role: { key: "USER", permissions: [{ permission: { key: "user:read" } }] } }],
+      userPermissions: [
+        {
+          isGranted: false,
+          grantedBy: "admin-1",
+          expiresAt: new Date(Date.now() - 1000),
+          permission: { key: "user:read" },
+        },
+      ],
+    });
+
+    const explain = await new PermissionService(db).explainFor("u1");
+
+    expect(explain[0]).toMatchObject({
+      key: "user:read",
+      source: "role",
+      expiredOverride: true,
+    });
+  });
+
+  it("canActOnResource: quyền ':own' chỉ áp dụng cho dữ liệu của chính mình", async () => {
+    const db = createDb({
+      userRoles: [roleWith("profile:update:own")],
+      userPermissions: [],
+    });
+    const service = new PermissionService(db);
+    const rule = { any: "user:update", own: "profile:update:own" } as const;
+
+    expect(await service.canActOnResource("u1", "u1", rule)).toBe(true);
+    expect(await service.canActOnResource("u1", "nguoi-khac", rule)).toBe(false);
   });
 });

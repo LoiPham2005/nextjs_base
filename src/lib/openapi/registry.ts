@@ -14,8 +14,8 @@ import {
 import {
   createUserSchema,
   updateUserSchema,
-  updateUserStatusSchema,
-  userSchema,
+  setUserStatusSchema,
+  publicUserSchema,
 } from "@/schemas/user.schema";
 import { createRoleSchema, updateRoleSchema } from "@/schemas/role.schema";
 import { API_PREFIX } from "@/lib/api/version";
@@ -142,7 +142,7 @@ const bearerAuth = registry.registerComponent("securitySchemes", "bearerAuth", {
  * ⚠️ Tên ở đây là HỢP ĐỒNG công khai. Đổi tên = breaking change với client đã
  * sinh code — họ phải sửa import. Đặt tên cẩn thận ngay từ đầu.
  */
-const userSchemaRef = registry.register("User", userSchema);
+const publicUserSchemaRef = registry.register("User", publicUserSchema);
 
 const loginRequestSchema = registry.register("LoginRequest", loginSchema);
 const registerRequestSchema = registry.register("RegisterRequest", registerSchema);
@@ -165,7 +165,7 @@ const createUserRequestSchema = registry.register("CreateUserRequest", createUse
 const updateUserRequestSchema = registry.register("UpdateUserRequest", updateUserSchema);
 const updateUserStatusRequestSchema = registry.register(
   "UpdateUserStatusRequest",
-  updateUserStatusSchema,
+  setUserStatusSchema,
 );
 
 const createRoleRequestSchema = registry.register("CreateRoleRequest", createRoleSchema);
@@ -174,7 +174,7 @@ const updateRoleRequestSchema = registry.register("UpdateRoleRequest", updateRol
 // --- Envelope response, đặt tên và dùng lại ---------------------------------
 
 const emptyResponse = envelope("EmptyResponse", z.object({}));
-const userResponse = envelope("UserResponse", z.object({ user: userSchemaRef }));
+const userResponse = envelope("UserResponse", z.object({ user: publicUserSchemaRef }));
 const idResponse = envelope("IdResponse", z.object({ id: z.string() }));
 
 // --- Auth ---------------------------------------------------------------
@@ -182,7 +182,7 @@ const idResponse = envelope("IdResponse", z.object({ id: z.string() }));
 const tokenPairSchema = registry.register(
   "TokenPair",
   z.object({
-    user: userSchemaRef,
+    user: publicUserSchemaRef,
     accessToken: z.string(),
     expiresIn: z.number().int(),
     tokenType: z.literal("Bearer"),
@@ -344,7 +344,7 @@ registry.registerPath({
 const usersListResponse = envelope(
   "UsersListResponse",
   z.object({
-    users: z.array(userSchemaRef),
+    users: z.array(publicUserSchemaRef),
     pagination: z.object({ perPage: z.number(), nextCursor: z.string().nullable() }),
   }),
 );

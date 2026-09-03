@@ -40,7 +40,7 @@ const updated = {
   email: "user@example.com",
   username: "user",
   fullName: "Tên mới",
-  role: "USER",
+  roles: "USER",
   roleName: "Người dùng",
   emailVerifiedAt: null,
   status: "ACTIVE" as const,

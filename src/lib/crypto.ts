@@ -1,53 +1,54 @@
 import { hash as argon2Hash, verify as argon2Verify } from "@node-rs/argon2";
-import { compare as bcryptCompare } from "bcryptjs";
 
 /**
- * Băm và kiểm tra mật khẩu.
+ * Băm và kiểm tra mật khẩu. MỘT thuật toán duy nhất: Argon2id.
  *
  * ---
- * VÌ SAO ARGON2ID CHỨ KHÔNG PHẢI BCRYPT
+ * VÌ SAO ARGON2ID
  *
- * Argon2id là lựa chọn số một của OWASP hiện nay. Khác biệt cốt lõi: bcrypt chỉ
- * tốn CPU, còn Argon2id tốn CPU *và* bộ nhớ. Kẻ tấn công dựng dàn GPU hoặc ASIC
- * để dò offline bị chặn bởi băng thông bộ nhớ chứ không phải số nhân — đó là
- * thứ đắt và khó mở rộng hơn nhiều.
+ * Lựa chọn số một của OWASP hiện nay. Khác biệt cốt lõi so với bcrypt: bcrypt
+ * chỉ tốn CPU, còn Argon2id tốn CPU *và* bộ nhớ. Kẻ tấn công dựng dàn GPU/ASIC
+ * để dò offline bị chặn bởi băng thông bộ nhớ chứ không phải số nhân — thứ đắt
+ * và khó mở rộng hơn nhiều.
  *
- * Thư viện dùng `@node-rs/argon2` (viết bằng Rust, nạp qua N-API) thay vì
- * `bcryptjs` thuần JavaScript: bcryptjs chạy trên chính luồng của Node, nên vài
- * người đăng nhập đồng thời là cả tiến trình khựng lại. Bản Rust chạy ngoài
- * luồng chính và nhanh hơn nhiều lần, đồng thời có sẵn bản dựng cho musl nên
- * image Alpine không cần biên dịch gì.
+ * Dùng `@node-rs/argon2` (Rust, nạp qua N-API) thay vì bản JavaScript thuần:
+ * bản JS chạy trên chính luồng của Node, nên vài người đăng nhập đồng thời là
+ * cả tiến trình khựng lại. Bản Rust chạy ngoài luồng chính và có sẵn bản dựng
+ * cho musl, nên image Alpine không phải biên dịch gì.
  *
  * ---
- * VÌ SAO VẪN GIỮ BCRYPT
+ * KHÔNG CÓ ĐƯỜNG LUI VỀ BCRYPT — VÀ ĐÓ LÀ CHỦ ĐÍCH
  *
- * Database đang chạy có sẵn hash bcrypt. Gỡ bcrypt đi là mọi tài khoản cũ mất
- * quyền đăng nhập vĩnh viễn — không có cách nào chuyển đổi một hash sang thuật
- * toán khác mà không biết mật khẩu gốc.
+ * Đây là bộ khung khởi tạo dự án MỚI: không có kho mật khẩu cũ nào để tương
+ * thích. Giữ thêm một thuật toán "phòng khi cần" là giữ một nhánh mã không ai
+ * chạy, không ai test, và là một dependency nữa phải theo dõi lỗ hổng.
  *
- * Cách xử lý: đăng nhập vẫn kiểm tra được hash bcrypt, và ngay lúc đó — khi mật
- * khẩu gốc còn trong bộ nhớ — băm lại bằng Argon2id rồi ghi đè. Người dùng
- * không thấy gì khác, còn dữ liệu tự chuyển dần sang thuật toán mới sau mỗi lần
- * đăng nhập. Xem `AuthService.validateCredentials`.
+ * Hash bcrypt lọt vào database (do nhập dữ liệu từ hệ thống cũ) sẽ khiến
+ * `verifyPassword` trả về "sai mật khẩu" — thất bại AN TOÀN, không crash. Nếu
+ * dự án của bạn THẬT SỰ phải nhận dữ liệu cũ, cách đúng là:
+ *
+ *   1. `pnpm add bcryptjs` trong packages/core
+ *   2. Trong `verifyPassword`, nhận diện tiền tố `$2` rồi so bằng bcrypt
+ *   3. Trả `needsRehash: true` khi đúng — mỗi lần đăng nhập thành công là một
+ *      bản ghi được nâng cấp sang Argon2id mà người dùng không phải làm gì
+ *   4. Gỡ bcrypt đi sau khi số hash `$2` trong database về 0
  */
 
 /**
- * Tham số theo khuyến nghị OWASP cho Argon2id: 19 MiB bộ nhớ, 2 lượt, 1 luồng.
+ * Mã của thuật toán Argon2id trong `@node-rs/argon2`.
+ *
+ * Viết thẳng số thay vì import `Algorithm.Argon2id`: đó là ambient const enum,
+ * mà `isolatedModules` trong tsconfig cấm truy cập loại enum này.
+ */
+const ARGON2ID = 2;
+
+/**
+ * Tham số theo khuyến nghị OWASP: 19 MiB bộ nhớ, 2 lượt, 1 luồng.
  *
  * Ghi rõ ra đây thay vì dựa vào mặc định của thư viện, vì tham số nằm ngay
  * trong chuỗi hash: đổi tham số là mọi hash cũ bị coi là lỗi thời và được băm
  * lại ở lần đăng nhập kế tiếp. Đó là hành vi mong muốn, nhưng phải cố ý.
  */
-/**
- * Mã của thuật toán Argon2id trong `@node-rs/argon2`.
- *
- * Viết thẳng số thay vì import `Algorithm.Argon2id`: enum đó là ambient const
- * enum, mà `verbatimModuleSyntax` trong tsconfig cấm truy cập loại enum này.
- * Ghi rõ ở đây vẫn tốt hơn là dựa vào giá trị mặc định của thư viện — tham số
- * bảo mật không nên nằm ngoài tầm nhìn.
- */
-const ARGON2ID = 2;
-
 const ARGON2_OPTIONS = {
   algorithm: ARGON2ID,
   memoryCost: 19456,
@@ -56,24 +57,17 @@ const ARGON2_OPTIONS = {
 } as const;
 
 /**
- * Tiền tố mà một hash "đạt chuẩn hiện tại" phải có.
- *
- * Hash Argon2 tự mang tham số của nó: `$argon2id$v=19$m=19456,t=2,p=1$...`.
- * So tiền tố là cách rẻ nhất để biết một hash có được sinh bằng đúng cấu hình
- * đang dùng hay không, không cần phân tích cú pháp.
+ * Tiền tố mà một hash "đạt chuẩn hiện tại" phải có. Hash Argon2 tự mang tham
+ * số của nó (`$argon2id$v=19$m=19456,t=2,p=1$...`), nên so tiền tố là cách rẻ
+ * nhất để biết hash có được sinh bằng đúng cấu hình đang dùng không.
  */
 const CURRENT_HASH_PREFIX = `$argon2id$v=19$m=${ARGON2_OPTIONS.memoryCost},t=${ARGON2_OPTIONS.timeCost},p=${ARGON2_OPTIONS.parallelism}$`;
 
-/** Mọi biến thể bcrypt đều bắt đầu bằng `$2` — `$2a$`, `$2b$`, `$2y$`. */
-function isBcryptHash(value: string): boolean {
-  return value.startsWith("$2");
-}
-
 /**
- * Hash dùng cho phép so sánh giả. Tính một lần rồi cache lại.
+ * Hash dùng cho phép so sánh giả. Tính một lần rồi cache.
  *
- * Không có nó, "email không tồn tại" trả về nhanh hơn hẳn "sai mật khẩu", và kẻ
- * tấn công đo thời gian phản hồi là dò ra được email nào đã đăng ký.
+ * Không có nó, "email không tồn tại" trả về nhanh hơn hẳn "sai mật khẩu", và
+ * kẻ tấn công chỉ cần đo thời gian phản hồi là dò ra email nào đã đăng ký.
  */
 let dummyHashPromise: Promise<string> | null = null;
 
@@ -85,9 +79,12 @@ function getDummyHash(): Promise<string> {
 export type PasswordCheck = {
   valid: boolean;
   /**
-   * `true` khi mật khẩu đúng nhưng hash được sinh bằng thuật toán hoặc tham số
-   * cũ. Nơi gọi nên băm lại và ghi đè — đây là cửa sổ duy nhất còn giữ mật khẩu
-   * gốc trong bộ nhớ.
+   * `true` khi mật khẩu ĐÚNG nhưng hash được sinh bằng THAM SỐ cũ — ví dụ sau
+   * khi bạn nâng `memoryCost` để theo kịp phần cứng mới.
+   *
+   * Nơi gọi nên băm lại và ghi đè: đây là cửa sổ duy nhất còn giữ mật khẩu gốc
+   * trong bộ nhớ. Nhờ vậy toàn bộ kho mật khẩu tự nâng cấp dần sau mỗi lần
+   * đăng nhập, không cần bắt ai đổi mật khẩu.
    */
   needsRehash: boolean;
 };
@@ -98,23 +95,16 @@ export const CryptoUtils = {
   },
 
   /**
-   * Kiểm tra mật khẩu, tự nhận diện thuật toán từ chính chuỗi hash.
+   * Kiểm tra mật khẩu.
    *
-   * Không bao giờ ném lỗi: một hash rác trong database phải dẫn tới "sai mật
-   * khẩu", chứ không phải lỗi 500 làm lộ ra rằng bản ghi đó có vấn đề.
+   * KHÔNG BAO GIỜ ném lỗi: một hash rác trong database (hoặc hash thuộc thuật
+   * toán khác) phải dẫn tới "sai mật khẩu", chứ không phải lỗi 500 làm lộ ra
+   * rằng bản ghi đó có vấn đề.
    */
   async verifyPassword(password: string, passwordHash: string): Promise<PasswordCheck> {
-    if (isBcryptHash(passwordHash)) {
-      const valid = await bcryptCompare(password, passwordHash).catch(() => false);
-      return { valid, needsRehash: valid };
-    }
-
     const valid = await argon2Verify(passwordHash, password).catch(() => false);
 
-    return {
-      valid,
-      needsRehash: valid && !passwordHash.startsWith(CURRENT_HASH_PREFIX),
-    };
+    return { valid, needsRehash: valid && !passwordHash.startsWith(CURRENT_HASH_PREFIX) };
   },
 
   /** Đốt lượng thời gian tương đương một lần kiểm tra thật. */

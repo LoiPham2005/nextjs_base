@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { setUserStatusAction, unlockUserAction } from "./actions";
-import type { UserStatusInput } from "@/schemas/user.schema";
+import type { UserStatus } from "@/schemas/user.schema";
 import { Button } from "@/components/ui/button";
 
 export function UserStatusButton({
@@ -13,7 +13,7 @@ export function UserStatusButton({
 }: {
   id: string;
   email: string;
-  status: UserStatusInput;
+  status: UserStatus;
   /** ISO string nếu đang bị khoá tạm do sai mật khẩu liên tiếp — xem `AuthService`. */
   lockedUntil: string | null;
 }) {
@@ -21,7 +21,7 @@ export function UserStatusButton({
   const isLockedNow = lockedUntil !== null && new Date(lockedUntil) > new Date();
 
   const toggleStatus = () => {
-    const next: UserStatusInput = status === "BANNED" ? "ACTIVE" : "BANNED";
+    const next: UserStatus = status === "BANNED" ? "ACTIVE" : "BANNED";
     const confirmMessage =
       next === "BANNED"
         ? `Khoá tài khoản ${email}? Người này sẽ không đăng nhập được nữa.`

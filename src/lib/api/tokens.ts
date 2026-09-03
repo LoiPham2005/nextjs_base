@@ -1,7 +1,7 @@
 import "server-only";
 import { ACCESS_TOKEN_MAX_AGE_SECONDS, signSession } from "@/lib/session";
 import { tokenService } from "@/services/token.service";
-import type { PublicUser } from "@/services/user.service";
+import type { PublicUser } from "@/schemas/user.schema";
 
 export type TokenPair = {
   accessToken: string;
@@ -31,15 +31,24 @@ export type TokenPair = {
  * hình dạng response — client Flutter chỉ phải viết một model duy nhất.
  */
 export async function issueTokenPair(
-  user: Pick<PublicUser, "id" | "email" | "role">,
-  userAgent?: string | null,
+  user: Pick<PublicUser, "id" | "email" | "roles">,
+  context: { userAgent?: string | null; ip?: string | null; twoFactorAt?: Date | null } = {},
 ): Promise<TokenPair> {
+  const refresh = await tokenService.issue(user.id, context);
+
   const accessToken = await signSession(
-    { sub: user.id, email: user.email, role: user.role },
+    {
+      typ: "access",
+      sub: user.id,
+      email: user.email,
+      roles: user.roles,
+      // `familyId`, KHÔNG phải id bản ghi token: giá trị này không đổi qua các
+      // lần refresh, nên client giữ được một định danh phiên ổn định.
+      sid: refresh.familyId,
+      ...(context.twoFactorAt ? { mfa: context.twoFactorAt.toISOString() } : {}),
+    },
     ACCESS_TOKEN_MAX_AGE_SECONDS,
   );
-
-  const refresh = await tokenService.issue(user.id, userAgent);
 
   return {
     accessToken,
@@ -47,6 +56,6 @@ export async function issueTokenPair(
     tokenType: "Bearer",
     refreshToken: refresh.token,
     refreshExpiresAt: refresh.expiresAt.toISOString(),
-    sessionId: refresh.id,
+    sessionId: refresh.familyId,
   };
 }

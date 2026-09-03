@@ -84,13 +84,13 @@ export function defineAction<TArgs extends unknown[], TState extends ActionState
       return denied<TState>("Bạn cần đăng nhập để thực hiện thao tác này.");
     }
 
-    if (!(await permissionService.can(session.role, permission))) {
+    if (!(await permissionService.can(session.sub, permission))) {
       // Ghi log MỌI lần bị từ chối. Một tài khoản hợp lệ gõ cửa action nó không
       // có quyền là tín hiệu đáng chú ý — có thể là lỗi giao diện (hiện nút cho
       // người không đủ quyền), cũng có thể là ai đó đang dò.
       logger.warn("Server Action bị từ chối vì thiếu quyền", {
         userId: session.sub,
-        role: session.role,
+        roles: session.roles,
         permission,
       });
       return denied<TState>("Bạn không có quyền thực hiện thao tác này.");

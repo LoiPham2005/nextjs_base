@@ -1,4 +1,5 @@
 "use server";
+import { AccountBannedError, AccountLockedError, InvalidCredentialsError, InvalidVerificationTokenError, DuplicateFieldError } from "@/lib/errors";
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -14,14 +15,7 @@ import {
   resetPasswordSchema,
   verifyEmailSchema,
 } from "@/schemas/auth.schema";
-import {
-  AccountBannedError,
-  AccountLockedError,
-  authService,
-  InvalidCredentialsError,
-  InvalidVerificationTokenError,
-} from "@/services/auth.service";
-import { UserAlreadyExistsError } from "@/services/user.service";
+import { authService } from "@/services/auth.service";
 
 /**
  * Tên các ô trong form xác thực.
@@ -92,7 +86,7 @@ export async function loginAction(
   }
 
   await resetRateLimit(rateLimitKey);
-  await createSession({ sub: user.id, email: user.email, role: user.role });
+  await createSession({ typ: "access" as const, sub: user.id, email: user.email, roles: user.roles });
   logger.info("User logged in", { userId: user.id });
 
   // redirect() hoạt động bằng cách ném exception — phải nằm ngoài mọi try/catch.
@@ -126,14 +120,14 @@ export async function registerAction(
   try {
     user = await authService.register(parsed.data);
   } catch (error) {
-    if (error instanceof UserAlreadyExistsError) {
+    if (error instanceof DuplicateFieldError) {
       return { error: error.message };
     }
     logger.error("Registration failed", error, { email: parsed.data.email });
     return { error: "Không thể tạo tài khoản lúc này. Vui lòng thử lại." };
   }
 
-  await createSession({ sub: user.id, email: user.email, role: user.role });
+  await createSession({ typ: "access" as const, sub: user.id, email: user.email, roles: user.roles });
   logger.info("User registered", { userId: user.id });
 
   redirect("/users");

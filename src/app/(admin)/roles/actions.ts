@@ -1,4 +1,5 @@
 "use server";
+import { RoleInUseError, RoleKeyAlreadyExistsError, RoleNotFoundError, SystemRoleImmutableError, UnknownPermissionError } from "@/lib/errors";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -6,14 +7,7 @@ import { defineAction } from "@/lib/define-action";
 import { logger } from "@/lib/logger";
 import { auditService } from "@/services/audit.service";
 import { createRoleSchema, updateRoleSchema } from "@/schemas/role.schema";
-import {
-  roleService,
-  RoleInUseError,
-  RoleKeyAlreadyExistsError,
-  RoleNotFoundError,
-  SystemRoleImmutableError,
-  UnknownPermissionError,
-} from "@/services/role.service";
+import { roleService } from "@/services/role.service";
 
 /**
  * Mỗi Server Action là một HTTP endpoint công khai — trang gọi nó nằm sau lớp
@@ -138,7 +132,7 @@ export const deleteRoleAction = defineAction(
       // Luật "không xoá vai trò hệ thống" và "không xoá vai trò còn người
       // dùng" nằm trong service — chép lại ở đây thì sớm muộn hai bên cũng
       // lệch nhau.
-      await roleService.delete(key);
+      await roleService.remove(key);
     } catch (error) {
       if (
         error instanceof RoleNotFoundError ||

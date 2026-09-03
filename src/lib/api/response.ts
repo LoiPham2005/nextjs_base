@@ -3,38 +3,11 @@ import { z } from "zod";
 import { logger } from "@/lib/logger";
 import { getRequestId, REQUEST_ID_HEADER } from "@/lib/request-id";
 import {
-  AccountBannedError,
-  AccountLockedError,
-  InvalidCredentialsError,
-  InvalidVerificationTokenError,
-} from "@/services/auth.service";
-import { RefreshTokenReuseError } from "@/services/token.service";
-/*
- * Hai service cùng có một lớp tên `RoleNotFoundError`, và chúng KHÁC nhau về
- * ý nghĩa HTTP — nên phải phân biệt bằng alias thay vì gộp:
- *
- *   - từ user.service: "roleKey bạn gửi kèm khi tạo/sửa NGƯỜI DÙNG không tồn
- *     tại" → 422, vì tài nguyên bị hỏi tới (user) không hề thiếu, chỉ một
- *     trường trong body là sai.
- *   - từ role.service: "vai trò bạn đang thao tác không tồn tại" → 404, vì
- *     chính tài nguyên đó mới là thứ không tìm thấy.
- */
-import {
-  RoleInUseError,
-  RoleKeyAlreadyExistsError,
-  RoleNotFoundError as RoleRecordNotFoundError,
-  SystemRoleImmutableError,
-  UnknownPermissionError,
-} from "@/services/role.service";
-import {
-  RoleNotFoundError,
-  SelfDeletionError,
-  SelfRoleChangeError,
-  SelfStatusChangeError,
-  UserAlreadyExistsError,
-  UsernameAlreadyExistsError,
-  UserNotFoundError,
-} from "@/services/user.service";
+  DomainError,
+  RefreshTokenReuseError,
+  TwoFactorRequiredError,
+  type DomainErrorCode,
+} from "@/lib/errors";
 
 /**
  * Định dạng response thống nhất cho toàn bộ REST API.
@@ -56,6 +29,8 @@ export type ApiErrorCode =
   | "RATE_LIMITED"
   | "ACCOUNT_BANNED"
   | "ACCOUNT_LOCKED"
+  | "TWO_FACTOR_REQUIRED"
+  | "PROVIDER_ERROR"
   | "INTERNAL_ERROR";
 
 export class ApiError extends Error {
@@ -164,6 +139,31 @@ function buildErrorResponse(
   return response;
 }
 
+/**
+ * Lỗi nghiệp vụ → mã HTTP. Bảng này là TOÀN BỘ phần "dịch" giữa hai tầng.
+ *
+ * Trước đây chỗ này là một cây `if (error instanceof X)` dài, mỗi lớp lỗi một
+ * nhánh, và thêm một lỗi mới nghĩa là sửa hai file. Nay mọi lỗi nghiệp vụ đều
+ * kế thừa `DomainError` và tự mang `code`, nên bảng dưới đây đủ cho tất cả —
+ * kể cả lỗi thêm sau này.
+ */
+const DOMAIN_STATUS: Record<DomainErrorCode, number> = {
+  VALIDATION_ERROR: 422,
+  UNAUTHENTICATED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  ACCOUNT_BANNED: 403,
+  // 423 Locked: mật khẩu ĐÚNG, nhưng tài khoản đang tạm khoá — khác hẳn 401.
+  ACCOUNT_LOCKED: 423,
+  RATE_LIMITED: 429,
+  // 502: lỗi ở nhà cung cấp bên ngoài, không phải ở request của client.
+  PROVIDER_ERROR: 502,
+  // 401 nhưng `code` RIÊNG: client phải phân biệt "sai mật khẩu" với "mật khẩu
+  // đúng, cần nhập mã 2FA" — hai màn hình khác nhau.
+  TWO_FACTOR_REQUIRED: 401,
+};
+
 function buildErrorBody(error: unknown, context?: Record<string, unknown>): NextResponse {
   if (error instanceof ApiError) {
     return NextResponse.json(
@@ -178,62 +178,29 @@ function buildErrorBody(error: unknown, context?: Record<string, unknown>): Next
     );
   }
 
-  if (error instanceof InvalidCredentialsError) {
-    return buildErrorBody(new ApiError(401, "UNAUTHENTICATED", error.message));
-  }
+  if (error instanceof DomainError) {
+    // Token đã thu hồi được dùng lại là dấu hiệu tấn công, không phải lỗi
+    // thường — phải nhìn thấy được trong log dù response chỉ là 401 khô khan.
+    if (error instanceof RefreshTokenReuseError) {
+      logger.warn("Phát hiện refresh token bị dùng lại — đã huỷ họ phiên đó", {
+        userId: error.userId,
+      });
+    }
 
-  if (error instanceof AccountBannedError) {
-    return buildErrorBody(apiErrors.accountBanned(error.message));
-  }
+    if (error instanceof TwoFactorRequiredError) {
+      logger.info("Đăng nhập cần bước 2FA", { userId: error.userId });
+    }
 
-  if (error instanceof AccountLockedError) {
-    return buildErrorBody(apiErrors.accountLocked(error.message));
-  }
-
-  // 400 chứ không phải 401: người dùng chưa từng đăng nhập trong luồng này,
-  // nên "chưa xác thực" là thông điệp sai. Vấn đề nằm ở cái link họ vừa bấm.
-  if (error instanceof InvalidVerificationTokenError) {
-    return buildErrorBody(new ApiError(400, "VALIDATION_ERROR", error.message));
-  }
-
-  if (error instanceof RefreshTokenReuseError) {
-    logger.warn("Refresh token reuse detected", { userId: error.userId });
-    return buildErrorBody(
-      apiErrors.unauthenticated("Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại."),
+    return NextResponse.json(
+      {
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.fields ? { fields: error.fields } : {}),
+        },
+      },
+      { status: DOMAIN_STATUS[error.code] },
     );
-  }
-
-  if (
-    error instanceof UserAlreadyExistsError ||
-    error instanceof UsernameAlreadyExistsError ||
-    error instanceof SelfDeletionError ||
-    error instanceof SelfStatusChangeError ||
-    error instanceof SelfRoleChangeError ||
-    error instanceof RoleKeyAlreadyExistsError ||
-    // Hai lỗi này là "trạng thái hiện tại không cho phép", không phải "bạn gửi
-    // sai dữ liệu" — 409 nói đúng điều đó, còn 422 thì không.
-    error instanceof SystemRoleImmutableError ||
-    error instanceof RoleInUseError
-  ) {
-    return buildErrorBody(apiErrors.conflict(error.message));
-  }
-
-  if (error instanceof UnknownPermissionError) {
-    return buildErrorBody(apiErrors.validation({ permissions: [error.message] }));
-  }
-
-  if (error instanceof RoleRecordNotFoundError) {
-    return buildErrorBody(apiErrors.notFound(error.message));
-  }
-
-  // 422 chứ không phải 404: tài nguyên bị hỏi tới (user) không hề thiếu — dữ
-  // liệu gửi lên mới là thứ sai, ở đúng một trường cụ thể.
-  if (error instanceof RoleNotFoundError) {
-    return buildErrorBody(apiErrors.validation({ roleKey: [error.message] }));
-  }
-
-  if (error instanceof UserNotFoundError) {
-    return buildErrorBody(apiErrors.notFound(error.message));
   }
 
   logger.error("Unhandled API error", error, context);

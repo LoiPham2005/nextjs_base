@@ -1,125 +1,261 @@
-import "server-only";
+import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isKnownPermission, type Permission, type RoleKey } from "@/lib/permissions";
+import { isKnownPermission, type Permission } from "@/lib/permissions";
+import { cacheDelByPrefix, cacheGet, cacheSet } from "@/lib/cache";
 
 /**
- * Kiểm tra quyền lúc chạy, đọc từ database.
+ * Trả lời câu hỏi "người này được làm gì", đọc từ database, có cache.
  *
  * ---
- * VÌ SAO CÓ CACHE
+ * QUYỀN HIỆU LỰC ĐƯỢC TÍNH THẾ NÀO
  *
- * Kiểm tra quyền chạy trên gần như MỌI request. Nếu mỗi lần đều join ba bảng
- * thì đó là một truy vấn thêm vào đường đi nóng, chỉ để đọc dữ liệu gần như
- * không bao giờ đổi — bảng phân quyền được sửa vài lần một năm.
+ *   1. HỢP của quyền đến từ MỌI vai trò người đó đang mang.
+ *   2. Cộng thêm các `UserPermission` có `isGranted = true`.
+ *   3. TRỪ đi các `UserPermission` có `isGranted = false`.
  *
- * Cache toàn bộ bản đồ vai trò → quyền vào RAM, nạp một lần rồi dùng lại.
+ * Thứ tự quan trọng: bước 3 chạy SAU CÙNG, nên "tước quyền" luôn thắng. Cần
+ * chặn gấp một người khỏi một hành động thì phải chặn được ngay, không phải đi
+ * gỡ họ khỏi vai trò rồi dựng lại một vai trò gần giống.
+ *
+ * ---
+ * VÌ SAO CACHE THEO NGƯỜI DÙNG, KHÔNG PHẢI THEO VAI TRÒ
+ *
+ * Vì có `UserPermission`: hai người cùng vai trò vẫn có thể khác quyền. Cache
+ * theo vai trò sẽ bỏ sót đúng phần ngoại lệ — mà ngoại lệ mới là thứ người ta
+ * đặt ra khi có việc gấp.
  *
  * ---
  * HAI GIỚI HẠN PHẢI BIẾT
  *
- * 1. Cache nằm trong RAM của MỘT tiến trình. Chạy nhiều replica thì mỗi replica
- *    giữ bản sao riêng, và `invalidate()` chỉ xoá bản sao của replica đang xử
- *    lý request đó. Đây là lý do vẫn có TTL: replica khác tự làm mới sau
- *    `CACHE_TTL_MS`. Cần đồng bộ tức thì giữa các replica thì chuyển cache sang
- *    Redis — chỗ gọi giữ nguyên, chỉ thay phần bên trong file này.
+ * 1. Không có Redis thì cache nằm trong RAM của MỘT tiến trình, và
+ *    `invalidateUser()` chỉ xoá bản sao của tiến trình đang xử lý request đó.
+ *    Đây là lý do vẫn có TTL: tiến trình khác tự làm mới sau `CACHE_TTL`.
+ *    Có `REDIS_URL` thì cache dùng chung và xoá là xoá thật cho mọi instance.
  *
- * 2. Người dùng bị đổi vai trò vẫn giữ `role` cũ trong token cho tới khi token
- *    hết hạn. Cache ở đây không liên quan tới điều đó — xem ghi chú trong
- *    `src/lib/api/auth.ts`.
+ * 2. Quyền LUÔN được tra lại từ đây, KHÔNG BAO GIỜ đọc từ JWT. Ký quyền vào
+ *    token nghĩa là sửa phân quyền không có tác dụng cho tới khi token hết hạn
+ *    — người vừa bị tước quyền vẫn thao tác được thêm 15 phút nữa.
  */
 
 /**
- * Hạn cache. Một phút là đủ ngắn để thay đổi phân quyền lan ra nhanh, đủ dài
- * để chặn gần như toàn bộ truy vấn lặp lại.
+ * Một phút: đủ ngắn để thay đổi phân quyền lan ra nhanh, đủ dài để chặn gần
+ * như toàn bộ truy vấn lặp lại trên đường đi nóng.
+ *
+ * Cũng là ĐỘ TRỄ TỐI ĐA của việc hết hạn quyền tạm (`UserPermission.expiresAt`):
+ * một quyền hết hạn lúc 10:00 có thể còn dùng được tới 10:01. Chấp nhận được
+ * với "cấp quyền trong 24 giờ"; nếu dự án của bạn cần chính xác tới giây thì
+ * hạ TTL xuống — cái giá là nhiều truy vấn hơn.
  */
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_SECONDS = 60;
 
-type PermissionMap = Map<RoleKey, ReadonlySet<Permission>>;
+/** Đổi tiền tố này khi đổi hình dạng dữ liệu cache, nếu không bản deploy mới đọc phải giá trị cũ. */
+const CACHE_PREFIX = "perm:v1:";
+
+/** Một quyền, kèm lý do nó có (hoặc không có) hiệu lực. */
+export type PermissionExplanation = {
+  key: Permission;
+  /**
+   * `role`   — đến từ vai trò, xem `roles`.
+   * `grant`  — được cấp riêng cho người này, đè lên vai trò.
+   * `denied` — bị TƯỚC riêng. Quyền KHÔNG có hiệu lực, dù vai trò có cho.
+   */
+  source: "role" | "grant" | "denied";
+  /** Các vai trò cho quyền này. Rỗng khi nguồn là ngoại lệ cá nhân thuần tuý. */
+  roles: string[];
+  /** Ai đặt ngoại lệ. Chỉ có với `grant`/`denied`. */
+  grantedBy?: string | null;
+  /** Hạn của ngoại lệ. `null` = vĩnh viễn. */
+  expiresAt?: Date | null;
+  /** `true` khi từng có ngoại lệ nhưng nó đã hết hạn — quyền đã về theo vai trò. */
+  expiredOverride?: boolean;
+};
 
 export class PermissionService {
-  private cache: PermissionMap | null = null;
-  private loadedAt = 0;
-  /** Gộp các lần nạp đồng thời thành một truy vấn duy nhất. */
-  private inFlight: Promise<PermissionMap> | null = null;
+  constructor(private readonly db: PrismaClient = prisma) {}
 
   /**
-   * Xoá cache. Gọi sau MỌI thao tác ghi lên vai trò hoặc phân quyền.
-   *
-   * Quên gọi thì thay đổi phân quyền chỉ có hiệu lực sau khi TTL hết — người
-   * quản trị bỏ tick một quyền, thử lại ngay, thấy vẫn làm được, và kết luận
-   * là hệ thống hỏng.
+   * Xoá cache của MỘT người. Gọi sau khi đổi vai trò hoặc quyền riêng của họ.
    */
-  invalidate(): void {
-    this.cache = null;
-    this.loadedAt = 0;
+  async invalidateUser(userId: string): Promise<void> {
+    await cacheDelByPrefix(`${CACHE_PREFIX}${userId}`);
   }
 
-  private async load(): Promise<PermissionMap> {
-    const roles = await prisma.role.findMany({
+  /**
+   * Xoá cache của TẤT CẢ. Gọi sau khi sửa bảng phân quyền của một vai trò —
+   * lúc đó không biết được ai đang mang vai trò đó mà không truy vấn thêm, và
+   * thao tác này hiếm tới mức không đáng tối ưu.
+   */
+  async invalidateAll(): Promise<void> {
+    await cacheDelByPrefix(CACHE_PREFIX);
+  }
+
+  private async load(userId: string): Promise<Permission[]> {
+    const user = await this.db.user.findFirst({
+      where: { id: userId, deletedAt: null },
       select: {
-        key: true,
-        permissions: { select: { permission: { select: { key: true } } } },
+        userRoles: {
+          select: {
+            role: {
+              select: { permissions: { select: { permission: { select: { key: true } } } } },
+            },
+          },
+        },
+        userPermissions: {
+          // Bỏ qua ngoại lệ ĐÃ HẾT HẠN ngay trong truy vấn.
+          //
+          // Lọc ở tầng ứng dụng cũng được, nhưng lọc ở đây thì không có đường
+          // nào quên: mọi nơi hỏi "người này có quyền gì" đều đi qua đúng câu
+          // truy vấn này. Một quyền tạm mà vẫn còn hiệu lực sau khi hết hạn là
+          // đúng thứ mà cột `expiresAt` sinh ra để ngăn.
+          where: { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+          select: { isGranted: true, permission: { select: { key: true } } },
+        },
       },
     });
 
-    const map: PermissionMap = new Map();
+    if (!user) return [];
 
-    for (const role of roles) {
-      const granted = new Set<Permission>();
+    const granted = new Set<Permission>();
 
+    for (const { role } of user.userRoles) {
       for (const { permission } of role.permissions) {
         // Bỏ qua bản ghi còn sót của quyền đã bị xoá khỏi code. Không có bước
         // này, một dòng cũ trong database vẫn cấp được quyền mà không dòng mã
         // nào còn kiểm tra nó.
         if (isKnownPermission(permission.key)) granted.add(permission.key);
       }
-
-      map.set(role.key, granted);
     }
 
-    return map;
+    // Cấp thêm trước, tước sau — thứ tự quyết định: tước luôn thắng.
+    for (const item of user.userPermissions) {
+      if (item.isGranted && isKnownPermission(item.permission.key)) {
+        granted.add(item.permission.key);
+      }
+    }
+    for (const item of user.userPermissions) {
+      if (!item.isGranted) granted.delete(item.permission.key as Permission);
+    }
+
+    return [...granted];
   }
 
-  private async getMap(): Promise<PermissionMap> {
-    const fresh = this.cache && Date.now() - this.loadedAt < CACHE_TTL_MS;
-    if (fresh && this.cache) return this.cache;
+  /** Toàn bộ quyền hiệu lực của một người. */
+  async permissionsFor(userId: string): Promise<ReadonlySet<Permission>> {
+    const key = `${CACHE_PREFIX}${userId}`;
 
-    // Nhiều request cùng đến lúc cache vừa hết hạn sẽ cùng thấy `fresh` là
-    // false. Không gộp lại thì tất cả đều bắn truy vấn — đúng lúc tải cao nhất.
-    this.inFlight ??= this.load()
-      .then((map) => {
-        this.cache = map;
-        this.loadedAt = Date.now();
-        return map;
-      })
-      .finally(() => {
-        this.inFlight = null;
-      });
+    const cachedList = await cacheGet<Permission[]>(key);
+    if (cachedList) return new Set(cachedList);
 
-    return this.inFlight;
+    const list = await this.load(userId);
+    await cacheSet(key, list, CACHE_TTL_SECONDS);
+
+    return new Set(list);
   }
 
-  /** Quyền của một vai trò. Vai trò không tồn tại trả về tập rỗng. */
-  async permissionsFor(roleKey: RoleKey): Promise<ReadonlySet<Permission>> {
-    const map = await this.getMap();
-    return map.get(roleKey) ?? new Set<Permission>();
+  async can(userId: string, permission: Permission): Promise<boolean> {
+    return (await this.permissionsFor(userId)).has(permission);
   }
 
-  async can(roleKey: RoleKey, permission: Permission): Promise<boolean> {
-    const granted = await this.permissionsFor(roleKey);
-    return granted.has(permission);
-  }
-
-  /** Đúng khi vai trò có ÍT NHẤT MỘT trong các quyền được liệt kê. */
-  async canAny(roleKey: RoleKey, permissions: readonly Permission[]): Promise<boolean> {
-    const granted = await this.permissionsFor(roleKey);
+  /** Đúng khi có ÍT NHẤT MỘT trong các quyền được liệt kê. */
+  async canAny(userId: string, permissions: readonly Permission[]): Promise<boolean> {
+    const granted = await this.permissionsFor(userId);
     return permissions.some((permission) => granted.has(permission));
   }
 
-  /** Đúng khi vai trò có ĐỦ TẤT CẢ các quyền được liệt kê. */
-  async canAll(roleKey: RoleKey, permissions: readonly Permission[]): Promise<boolean> {
-    const granted = await this.permissionsFor(roleKey);
+  /** Đúng khi có ĐỦ TẤT CẢ các quyền được liệt kê. */
+  async canAll(userId: string, permissions: readonly Permission[]): Promise<boolean> {
+    const granted = await this.permissionsFor(userId);
     return permissions.every((permission) => granted.has(permission));
+  }
+
+  /**
+   * Quyền hiệu lực KÈM NGUỒN GỐC — dùng cho màn hỗ trợ/kiểm toán.
+   *
+   * ---
+   * VÌ SAO CẦN, KHI ĐÃ CÓ `permissionsFor()`
+   *
+   * `permissionsFor()` trả về "người này được làm gì" — đủ để QUYẾT ĐỊNH, nhưng
+   * không đủ để GIẢI THÍCH. Khi hệ thống có ngoại lệ cá nhân, câu hỏi thật của
+   * bộ phận hỗ trợ là: "vì sao tài khoản A xoá được người dùng?" — từ vai trò
+   * ADMIN, hay do ai đó cấp riêng, hay một quyền tạm sắp hết hạn?
+   *
+   * Không trả lời được câu đó thì mọi lần rà soát phân quyền đều phải mở
+   * database lên đọc tay.
+   *
+   * ⚠️ KHÔNG cache và KHÔNG dùng trên đường đi nóng: nó đọc nhiều hơn hẳn
+   * `permissionsFor()`. Đây là truy vấn cho một màn hình quản trị, không phải
+   * cho mỗi request.
+   */
+  async explainFor(userId: string): Promise<PermissionExplanation[]> {
+    const user = await this.db.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: {
+        userRoles: {
+          select: {
+            role: {
+              select: {
+                key: true,
+                permissions: { select: { permission: { select: { key: true } } } },
+              },
+            },
+          },
+        },
+        userPermissions: {
+          select: {
+            isGranted: true,
+            grantedBy: true,
+            expiresAt: true,
+            permission: { select: { key: true } },
+          },
+        },
+      },
+    });
+
+    if (!user) return [];
+
+    const byKey = new Map<Permission, PermissionExplanation>();
+
+    // 1. Từ vai trò. Một quyền có thể đến từ NHIỀU vai trò — giữ hết, vì
+    //    "gỡ vai trò nào thì mất quyền này" là câu hỏi tiếp theo của người tra.
+    for (const { role } of user.userRoles) {
+      for (const { permission } of role.permissions) {
+        if (!isKnownPermission(permission.key)) continue;
+
+        const existing = byKey.get(permission.key);
+        if (existing?.source === "role") {
+          existing.roles.push(role.key);
+        } else {
+          byKey.set(permission.key, { key: permission.key, source: "role", roles: [role.key] });
+        }
+      }
+    }
+
+    // 2. Ngoại lệ cá nhân, ghi đè phần trên — đúng thứ tự mà `load()` áp dụng.
+    const now = new Date();
+
+    for (const item of user.userPermissions) {
+      if (!isKnownPermission(item.permission.key)) continue;
+
+      const expired = item.expiresAt !== null && item.expiresAt <= now;
+      const previous = byKey.get(item.permission.key);
+
+      // Ngoại lệ ĐÃ HẾT HẠN không còn tác dụng: quyền quay về đúng những gì vai
+      // trò cho. Hiện nó ra vẫn có ích — người tra thấy được "đã từng cấp".
+      if (expired) {
+        if (previous) previous.expiredOverride = true;
+        continue;
+      }
+
+      byKey.set(item.permission.key, {
+        key: item.permission.key,
+        source: item.isGranted ? "grant" : "denied",
+        roles: previous?.source === "role" ? previous.roles : [],
+        grantedBy: item.grantedBy,
+        expiresAt: item.expiresAt,
+      });
+    }
+
+    return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
   }
 
   /**
@@ -127,19 +263,31 @@ export class PermissionService {
    *
    * Ví dụ: ADMIN đọc được hồ sơ của bất kỳ ai, còn USER chỉ đọc được hồ sơ của
    * chính mình. Gói luật đó vào một chỗ để nó không bị chép lại — và chép sai —
-   * ở từng route.
+   * ở từng controller.
+   *
+   * @example
+   * await permissions.canActOnResource(actorId, ownerId, {
+   *   any: "user:update",
+   *   own: "profile:update:own",
+   * });
    */
   async canActOnResource(
-    roleKey: RoleKey,
-    ownerId: string,
     actorId: string,
+    ownerId: string,
     permissions: { any: Permission; own: Permission },
   ): Promise<boolean> {
-    const granted = await this.permissionsFor(roleKey);
+    const granted = await this.permissionsFor(actorId);
 
     if (granted.has(permissions.any)) return true;
     return ownerId === actorId && granted.has(permissions.own);
   }
 }
 
+/**
+ * Instance dùng chung cho toàn ứng dụng.
+ *
+ * Constructor nhận `prisma` làm THAM SỐ MẶC ĐỊNH chứ không import cứng: chỗ
+ * gọi không phải đổi gì, mà test vẫn tiêm được database giả thay vì phải mock
+ * cả module `@/lib/prisma`.
+ */
 export const permissionService = new PermissionService();

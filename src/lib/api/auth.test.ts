@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionPayload } from "@/lib/session";
 
 const cookieStore = { get: vi.fn() };
 vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(cookieStore) }));
@@ -8,8 +9,8 @@ import { __clearRateLimits } from "@/lib/rate-limit";
 import { ApiError } from "./response";
 import { clientIp, enforceRateLimit, getApiSession, requireApiAdmin, requireApiUser } from "./auth";
 
-const adminPayload = { sub: "admin-1", email: "admin@example.com", role: "ADMIN" as const };
-const userPayload = { sub: "user-1", email: "user@example.com", role: "USER" as const };
+const adminPayload: SessionPayload = { sub: "admin-1", email: "admin@example.com", typ: "access" as const, roles: ["ADMIN"] };
+const userPayload: SessionPayload = { sub: "user-1", email: "user@example.com", typ: "access" as const, roles: ["USER"] };
 
 function requestWith(headers: Record<string, string> = {}) {
   return new Request("http://localhost/api/v1/users", { headers });

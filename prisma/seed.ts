@@ -1,43 +1,52 @@
 import "dotenv/config";
-import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
-import { seedProd } from "./seeds/seed-prod";
+import { seedRbac } from "./seeds/seed-rbac";
+import { seedAdmin } from "./seeds/seed-admin";
 import { seedDev } from "./seeds/seed-dev";
 
-// Prisma 7 bắt buộc dùng driver adapter, kể cả cho script chạy ngoài ứng dụng.
-const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
-});
-
 /**
- * Điểm vào duy nhất cho seeding; chọn bộ dữ liệu qua biến SEED_TYPE
- * (`pnpm db:seed:dev` / `pnpm db:seed:prod` đã set sẵn).
+ * Chạy: `pnpm db:seed`
  *
- * Mặc định nghiêng về "prod" khi NODE_ENV=production: nhầm lẫn ở đây phải dẫn
- * tới việc nạp ít dữ liệu hơn, không phải đổ user giả vào database thật.
+ * ---
+ * SEED PHẢI CHẠY LẠI ĐƯỢC NHIỀU LẦN
+ *
+ * Ràng buộc bắt buộc, không phải mong muốn: seed được gọi sau MỖI lần deploy,
+ * nên một seed chỉ chạy được lần đầu sẽ làm hỏng lần deploy thứ hai. Mọi thao
+ * tác ở đây đều là `upsert` hoặc `createMany` với `skipDuplicates`.
+ *
+ * ---
+ * BA PHẦN, TÁCH THEO MỨC ĐỘ AN TOÀN
+ *
+ *   seedRbac  — quyền & vai trò. Chạy ở MỌI môi trường, kể cả production.
+ *   seedAdmin — tài khoản quản trị đầu tiên, đọc từ ADMIN_EMAIL/ADMIN_PASSWORD.
+ *   seedDev   — dữ liệu mẫu có mật khẩu công khai. CHỈ dev.
  */
+const prisma = new PrismaClient();
+
 async function main() {
-  const seedType =
-    process.env.SEED_TYPE ?? (process.env.NODE_ENV === "production" ? "prod" : "dev");
+  const isProduction = process.env.NODE_ENV === "production";
 
-  if (seedType !== "dev" && seedType !== "prod") {
-    throw new Error(`SEED_TYPE không hợp lệ: "${seedType}" (chỉ nhận "dev" hoặc "prod")`);
-  }
+  console.log(`🌱 Seeding (NODE_ENV=${process.env.NODE_ENV ?? "development"})…`);
 
-  console.log(`🌱 Seed type: ${seedType.toUpperCase()}`);
+  await seedRbac(prisma);
+  console.log("✓ Đã đồng bộ quyền và vai trò hệ thống");
 
-  if (seedType === "prod") {
-    await seedProd(prisma);
+  await seedAdmin(prisma);
+
+  if (isProduction) {
+    console.log("⏭️  Bỏ qua dữ liệu mẫu: đang ở production");
   } else {
     await seedDev(prisma);
   }
+
+  console.log("🌱 Xong.");
 }
 
 main()
   .catch((error: unknown) => {
-    console.error("❌ Seeding thất bại:", error);
+    console.error("Seed thất bại:", error);
+    // Exit code khác 0 là thứ làm script deploy dừng lại. Không có dòng này thì
+    // seed hỏng vẫn được coi là deploy thành công.
     process.exitCode = 1;
   })
-  .finally(() => {
-    void prisma.$disconnect();
-  });
+  .finally(() => prisma.$disconnect());

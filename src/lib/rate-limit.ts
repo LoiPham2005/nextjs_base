@@ -1,24 +1,13 @@
-import type { createClient } from "redis";
-import { env } from "./env";
-import { logger } from "./logger";
+import { getRedis } from "@/lib/redis";
+import { logger } from "@/lib/logger";
 
 /**
- * Chỉ import KIỂU của client Redis, không import giá trị.
- *
- * `import type` bị xoá sạch khi biên dịch, nên thư viện `redis` vẫn chỉ được
- * nạp lúc chạy qua `await import()` bên dưới — máy không cấu hình Redis thì nó
- * không bao giờ vào bộ nhớ.
- */
-type RedisClient = ReturnType<typeof createClient>;
-
-/**
- * Rate limiter cửa sổ cố định, có store cắm được.
+ * Rate limiter cửa sổ cố định. Dùng Redis khi có `REDIS_URL`, RAM khi không.
  *
  * ---
  * VÌ SAO CẦN REDIS
  *
- * Bản trước đếm trong RAM của tiến trình. Điều đó đủ cho đúng một container,
- * nhưng hỏng theo hai cách khi lên thật:
+ * Đếm trong RAM đủ cho đúng MỘT container, nhưng hỏng theo hai cách khi lên thật:
  *
  *   - Chạy 2 replica → mỗi replica đếm riêng → ngưỡng thực tế nhân đôi. Kẻ dò
  *     mật khẩu chỉ cần bắn qua load balancer là được gấp N lần số lần thử.
@@ -28,25 +17,17 @@ type RedisClient = ReturnType<typeof createClient>;
  * ---
  * VÌ SAO VẪN GIỮ BẢN RAM
  *
- * Không phải dự án nào cũng có Redis, và bắt buộc phải có Redis mới chạy được
- * `pnpm dev` là một rào cản vô nghĩa. Nên: có `REDIS_URL` thì dùng Redis, không
- * có thì dùng RAM và ghi log cảnh báo một lần.
- *
- * ---
- * VÌ SAO HÀM TRỞ THÀNH ASYNC
- *
- * Redis là I/O. Giữ chữ ký đồng bộ đồng nghĩa với việc không bao giờ cắm được
- * Redis vào. Mọi nơi gọi đều đã nằm trong hàm async sẵn, nên cái giá chỉ là
- * thêm một từ khoá `await`.
+ * Bắt buộc phải có Redis mới chạy được `pnpm dev` là một rào cản vô nghĩa.
  */
+
 export type RateLimitOptions = { limit: number; windowSeconds: number };
 
 /**
- * Ngưỡng cho từng loại thao tác, khai báo một lần duy nhất.
+ * Ngưỡng cho từng loại thao tác, khai báo MỘT LẦN.
  *
- * Web và mobile là hai cửa vào khác nhau nhưng phải chịu chung một chính
- * sách. Trước đây các con số này nằm rải rác ở cả Server Action lẫn route
- * handler, nên siết ngưỡng đăng nhập mà quên một chỗ là cửa còn lại vẫn mở.
+ * Web và mobile là hai cửa vào khác nhau nhưng phải chịu chung một chính sách.
+ * Rải các con số này ở từng controller thì siết ngưỡng đăng nhập mà quên một
+ * chỗ là cửa còn lại vẫn mở.
  */
 export const RATE_LIMITS = {
   login: { limit: 5, windowSeconds: 300 },
@@ -54,38 +35,67 @@ export const RATE_LIMITS = {
   refresh: { limit: 30, windowSeconds: 300 },
 
   /**
-   * Gửi email: siết chặt hơn hẳn các endpoint khác.
-   *
-   * Không phải để chống dò mật khẩu, mà để không bị biến thành công cụ dội thư
-   * rác — mỗi lần gọi là một email gửi tới địa chỉ do người gọi chỉ định. Chi
-   * phí nằm ở hộp thư người khác và ở uy tín tên miền gửi của bạn.
+   * Gửi email: siết chặt hơn hẳn. Không phải để chống dò mật khẩu, mà để hệ
+   * thống không bị biến thành công cụ dội thư rác — mỗi lần gọi là một email
+   * gửi tới địa chỉ do người gọi chỉ định. Chi phí nằm ở hộp thư người khác và
+   * ở uy tín tên miền gửi của bạn.
    */
   passwordResetRequest: { limit: 3, windowSeconds: 900 },
   emailVerificationRequest: { limit: 3, windowSeconds: 900 },
 
   /**
-   * Đổi/đặt lại mật khẩu bằng token.
-   *
-   * Token là 256 bit ngẫu nhiên nên không dò được, nhưng mỗi lần gọi đều tốn
-   * một phép băm Argon2id — vốn cố tình ngốn bộ nhớ. Không giới hạn thì chính
-   * endpoint này là đường tấn công từ chối dịch vụ rẻ nhất của hệ thống.
+   * Đổi/đặt lại mật khẩu. Token là 256 bit ngẫu nhiên nên không dò được, nhưng
+   * mỗi lần gọi đều tốn một phép băm Argon2id — vốn cố tình ngốn bộ nhớ. Không
+   * giới hạn thì chính endpoint này là đường tấn công từ chối dịch vụ rẻ nhất
+   * của hệ thống.
    */
   passwordChange: { limit: 10, windowSeconds: 900 },
+
+  /**
+   * Mọi endpoint nhập mã 2FA (xác minh lúc đăng nhập, bật, tắt, cấp lại mã).
+   *
+   * Siết chặt vì mã TOTP chỉ có 10^6 khả năng và mã khôi phục thì ít hơn nhiều
+   * so với một token 256 bit. `VERIFICATION_MAX_ATTEMPTS` chặn theo từng mã;
+   * ngưỡng này chặn theo IP — hai lớp cho hai kiểu tấn công khác nhau.
+   */
+  twoFactor: { limit: 10, windowSeconds: 300 },
+
+  /**
+   * Đăng nhập/đăng ký bằng passkey.
+   *
+   * Rộng hơn `login` vì passkey KHÔNG dò được (chữ ký khoá công khai, không
+   * có gì để đoán) — giới hạn ở đây chỉ để chống bơm request, không phải chống
+   * dò thông tin đăng nhập.
+   */
+  passkey: { limit: 30, windowSeconds: 300 },
+
+  /**
+   * Xin mã OTP qua SMS — ngưỡng theo IP.
+   *
+   * Đây mới chỉ là lớp thứ nhất. Hai lớp còn lại (giãn cách và trần theo ngày
+   * trên từng SỐ ĐIỆN THOẠI) nằm trong `AuthService.requestPhoneVerification`,
+   * vì chỉ ở đó mới biết số điện thoại là gì.
+   */
+  phoneOtp: { limit: 5, windowSeconds: 900 },
+
+  /** Xin link upload — chặn việc bơm rác vào kho lưu trữ. */
+  upload: { limit: 60, windowSeconds: 300 },
 } as const satisfies Record<string, RateLimitOptions>;
+
+export type RateLimitScope = keyof typeof RATE_LIMITS;
 
 export type RateLimitResult = {
   success: boolean;
   remaining: number;
+  limit: number;
   /** Số giây còn lại tới khi cửa sổ reset. */
   retryAfterSeconds: number;
 };
 
 /**
- * Hợp đồng của một store.
- *
- * `hit` trả về số lần đã dùng trong cửa sổ hiện tại và thời điểm cửa sổ reset.
- * Phần quyết định cho qua hay chặn nằm ngoài store — nhờ vậy chính sách chỉ
- * tồn tại ở một chỗ, dù đang chạy trên RAM hay trên Redis.
+ * `hit` trả về số lần đã dùng trong cửa sổ hiện tại và thời điểm reset. Phần
+ * quyết định cho qua hay chặn nằm NGOÀI store — nhờ vậy chính sách chỉ tồn tại
+ * ở một chỗ, dù đang chạy trên RAM hay trên Redis.
  */
 type RateLimitStore = {
   hit(key: string, windowSeconds: number): Promise<{ count: number; resetAt: number }>;
@@ -93,13 +103,10 @@ type RateLimitStore = {
   clear(): Promise<void>;
 };
 
-// ---------------------------------------------------------------------------
-// Store trong RAM — mặc định khi không có REDIS_URL
-// ---------------------------------------------------------------------------
-
-type Bucket = { count: number; resetAt: number };
+const REDIS_PREFIX = "rl:";
 
 function createMemoryStore(): RateLimitStore {
+  type Bucket = { count: number; resetAt: number };
   const buckets = new Map<string, Bucket>();
 
   /** Dọn bucket hết hạn để Map không phình vô hạn theo số IP đã từng gọi. */
@@ -126,12 +133,10 @@ function createMemoryStore(): RateLimitStore {
 
       return Promise.resolve({ count: bucket.count, resetAt: bucket.resetAt });
     },
-
     reset(key) {
       buckets.delete(key);
       return Promise.resolve();
     },
-
     clear() {
       buckets.clear();
       return Promise.resolve();
@@ -139,56 +144,33 @@ function createMemoryStore(): RateLimitStore {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Store trên Redis — dùng khi có REDIS_URL
-// ---------------------------------------------------------------------------
-
-const REDIS_PREFIX = "rl:";
-
-function createRedisStore(url: string): RateLimitStore {
-  // Nạp `redis` bằng import động: máy không cấu hình Redis thì thư viện không
-  // bao giờ được kéo vào bộ nhớ, và bundle của Next cũng không phải mang nó.
-  let clientPromise: Promise<RedisClient> | null = null;
-
-  async function getClient() {
-    clientPromise ??= (async () => {
-      const { createClient } = await import("redis");
-      const client: RedisClient = createClient({ url });
-
-      // Không để lỗi kết nối thành unhandled error — node-redis phát 'error'
-      // trên mọi lần mất kết nối, và một sự kiện không ai nghe sẽ giết tiến trình.
-      client.on("error", (error: unknown) => {
-        logger.error("Rate limit: lỗi kết nối Redis", error);
-      });
-
-      await client.connect();
-      logger.info("Rate limit: dùng Redis", { url: redactUrl(url) });
-      return client;
-    })();
-
-    return clientPromise;
+function createRedisStore(): RateLimitStore {
+  async function client() {
+    const redis = getRedis();
+    if (!redis) throw new Error("Redis chưa được cấu hình");
+    return redis;
   }
 
   return {
     async hit(key, windowSeconds) {
-      const client = await getClient();
+      const redis = await client();
       const redisKey = `${REDIS_PREFIX}${key}`;
 
       /*
-       * INCR rồi mới EXPIRE, và chỉ EXPIRE ở lần đầu tiên.
+       * INCR rồi mới EXPIRE, và chỉ EXPIRE ở lần đầu tiên (`NX`).
        *
        * Thứ tự này quan trọng: đặt lại TTL ở mỗi lần gọi sẽ biến cửa sổ cố
        * định thành cửa sổ trượt vô hạn — kẻ tấn công gõ đều tay thì khoá không
        * bao giờ hết hạn, kể cả sau khi họ đã dừng.
        *
-       * Gộp vào một pipeline để chỉ đi một vòng mạng.
+       * Gộp vào một pipeline để chỉ đi MỘT vòng mạng.
        */
-      const replies: unknown[] = await client
+      const replies = (await redis
         .multi()
         .incr(redisKey)
         .expire(redisKey, windowSeconds, "NX")
         .ttl(redisKey)
-        .exec();
+        .exec()) as unknown[];
 
       const count = Number(replies[0]);
       const ttl = Number(replies[2]);
@@ -199,42 +181,28 @@ function createRedisStore(url: string): RateLimitStore {
 
       return { count, resetAt: Date.now() + remainingSeconds * 1000 };
     },
-
     async reset(key) {
-      const client = await getClient();
-      await client.del(`${REDIS_PREFIX}${key}`);
+      await (await client()).del(`${REDIS_PREFIX}${key}`);
     },
-
     async clear() {
-      const client = await getClient();
-      // Chỉ xoá khoá của rate limit, không đụng tới phần còn lại của Redis —
-      // instance này có thể đang được dùng chung với adapter của realtime.
-      const keys = await client.keys(`${REDIS_PREFIX}*`);
-      if (keys.length > 0) await client.del(keys);
+      const redis = await client();
+      // Chỉ xoá khoá của rate limit — instance Redis này còn dùng cho cache và
+      // hàng đợi.
+      for await (const keys of redis.scanIterator({ MATCH: `${REDIS_PREFIX}*`, COUNT: 100 })) {
+        const batch = Array.isArray(keys) ? keys : [keys];
+        if (batch.length > 0) await redis.del(batch);
+      }
     },
   };
 }
-
-/** Bỏ mật khẩu khỏi connection string trước khi đưa vào log. */
-function redactUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    if (parsed.password) parsed.password = "***";
-    return parsed.toString();
-  } catch {
-    return "(không đọc được)";
-  }
-}
-
-// ---------------------------------------------------------------------------
 
 let store: RateLimitStore | null = null;
 
 function getStore(): RateLimitStore {
   if (store) return store;
 
-  if (env.REDIS_URL) {
-    store = createRedisStore(env.REDIS_URL);
+  if (getRedis()) {
+    store = createRedisStore();
   } else {
     store = createMemoryStore();
     logger.warn(
@@ -259,28 +227,29 @@ export async function rateLimit(key: string, options: RateLimitOptions): Promise
      * Redis chết mà ta chặn hết mọi request thì một sự cố hạ tầng biến thành
      * sập dịch vụ toàn phần — đăng nhập, đăng ký, quên mật khẩu, tất cả đứng
      * im. Đổi lại là một cửa sổ không có rate limit, đúng bằng thời gian Redis
-     * chết. Đánh đổi này CÓ THẬT: nếu hệ thống của bạn coi brute-force nguy
-     * hiểm hơn downtime, hãy đổi chỗ này thành chặn.
+     * chết.
+     *
+     * Đánh đổi này CÓ THẬT: nếu hệ thống của bạn coi brute-force nguy hiểm hơn
+     * downtime, đổi chỗ này thành chặn.
      */
     logger.error("Rate limit: store lỗi, tạm cho qua", error, { key });
-    return { success: true, remaining: options.limit, retryAfterSeconds: 0 };
+    return { success: true, remaining: options.limit, limit: options.limit, retryAfterSeconds: 0 };
   }
-
-  const retryAfterSeconds = Math.max(1, Math.ceil((hit.resetAt - Date.now()) / 1000));
 
   return {
     success: hit.count <= options.limit,
     remaining: Math.max(0, options.limit - hit.count),
-    retryAfterSeconds,
+    limit: options.limit,
+    retryAfterSeconds: Math.max(1, Math.ceil((hit.resetAt - Date.now()) / 1000)),
   };
 }
 
-/** Xoá giới hạn của một key — gọi sau khi đăng nhập thành công. */
+/** Xoá giới hạn của một key — gọi sau khi đăng nhập THÀNH CÔNG. */
 export async function resetRateLimit(key: string): Promise<void> {
   try {
     await getStore().reset(key);
   } catch (error) {
-    // Không ném lên: người dùng vừa đăng nhập THÀNH CÔNG. Chặn họ chỉ vì dọn
+    // Không ném lên: người dùng vừa đăng nhập thành công. Chặn họ chỉ vì dọn
     // bộ đếm thất bại là biến một thao tác nền thành lỗi nhìn thấy được.
     logger.error("Rate limit: không xoá được bộ đếm", error, { key });
   }

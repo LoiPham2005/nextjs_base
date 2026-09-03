@@ -1,163 +1,122 @@
-import "server-only";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { type ListAuditLogsInput } from "@/schemas/audit.schema";
+import { buildPaginationMeta, toPrismaPage } from "@/schemas/common.schema";
 import { logger } from "@/lib/logger";
 
-/**
- * Nhật ký thao tác — ai đổi gì, lúc nào.
- *
- * ---
- * VÌ SAO DỰ ÁN NÀY CẦN NÓ HƠN PHẦN LỚN DỰ ÁN KHÁC
- *
- * Phân quyền ở đây sửa được lúc chạy. Một người có `role:update` có thể tự cấp
- * thêm quyền cho vai trò của chính mình — hợp lệ về mặt kỹ thuật, và không có
- * bảng này thì không cách nào biết chuyện đó đã xảy ra, cũng không biết lúc nào.
- *
- * ---
- * GHI NHẬT KÝ KHÔNG BAO GIỜ ĐƯỢC LÀM HỎNG THAO TÁC CHÍNH
- *
- * Đây là quyết định thiết kế quan trọng nhất của file này: `record()` **nuốt
- * mọi lỗi**. Database nhật ký đầy đĩa, hay một cột bị đổi kiểu, thì người dùng
- * vẫn phải xoá được vai trò của họ.
- *
- * Đánh đổi rõ ràng: có thể MẤT bản ghi nhật ký. Chấp nhận được với nhật ký vận
- * hành. KHÔNG chấp nhận được nếu bạn cần nhật ký cho mục đích pháp lý hoặc
- * tuân thủ — lúc đó phải ghi trong CÙNG transaction với thao tác chính, và để
- * thao tác thất bại theo. Xem `recordOrThrow` bên dưới.
- *
- * ---
- * ĐỪNG GHI DỮ LIỆU NHẠY CẢM VÀO `metadata`
- *
- * Nhật ký sống rất lâu và thường được xuất ra để điều tra. Mật khẩu, token,
- * số thẻ, thông tin cá nhân — không thứ nào được vào đây. Ghi "đã đổi mật
- * khẩu", đừng ghi mật khẩu.
- */
-
 export type AuditEntry = {
-  /** Việc gì, quy ước `<tài-nguyên>.<hành-động>` — ví dụ `role.permissions_updated`. */
   action: string;
-  /** Loại đối tượng: `role`, `user`… */
   entity: string;
   entityId?: string | null;
-  /** Ai làm. Bỏ trống = tiến trình hệ thống (seed, cron, worker). */
+  /** `null` = hệ thống tự làm (cron, webhook). */
   actorId?: string | null;
   actorEmail?: string | null;
-  /** Chi tiết đủ để hiểu chuyện gì đã xảy ra. KHÔNG chứa dữ liệu nhạy cảm. */
-  metadata?: Prisma.InputJsonValue;
+  /**
+   * Dữ liệu trước & sau khi đổi. Đừng nhét mật khẩu hay token vào đây.
+   *
+   * Kiểu là `Record<string, unknown>` chứ không phải `Prisma.InputJsonValue`:
+   * nơi gọi thường truyền thẳng một DTO, mà DTO là một class nên không có index
+   * signature và TypeScript từ chối. Bắt mọi controller phải tự ép kiểu chỉ để
+   * ghi được một dòng nhật ký là cái giá sai chỗ — ép ở đây, một lần.
+   */
+  metadata?: Record<string, unknown>;
   ip?: string | null;
   userAgent?: string | null;
 };
 
+/**
+ * Nhật ký hành động nhạy cảm.
+ *
+ * ---
+ * VÌ SAO `record()` KHÔNG BAO GIỜ NÉM LỖI
+ *
+ * Ghi nhật ký là việc PHỤ. Nếu bảng audit đầy đĩa hoặc database chậm, hành vi
+ * đúng là mất một dòng nhật ký — không phải làm hỏng thao tác nghiệp vụ mà
+ * người dùng vừa thực hiện thành công. Lỗi được ghi lại qua `logger.error` nên
+ * không biến mất, chỉ là không chặn ai.
+ *
+ * ⚠️ Nếu dự án của bạn có yêu cầu pháp lý phải ghi được nhật ký mới cho phép
+ * thao tác (ngân hàng, y tế), hãy đổi chỗ này thành ném lỗi và gọi nó TRONG
+ * cùng transaction với thao tác nghiệp vụ.
+ */
 export class AuditService {
-  /**
-   * Ghi một bản ghi nhật ký. **Không bao giờ ném lỗi.**
-   *
-   * Gọi SAU khi thao tác chính đã thành công — ghi trước rồi thao tác thất bại
-   * thì nhật ký nói dối.
-   */
+  constructor(private readonly db: PrismaClient = prisma) {}
+
   async record(entry: AuditEntry): Promise<void> {
     try {
-      await prisma.auditLog.create({
+      await this.db.auditLog.create({
         data: {
           action: entry.action,
           entity: entry.entity,
           entityId: entry.entityId ?? null,
           actorId: entry.actorId ?? null,
+          // Chép email tại thời điểm đó: actor có thể bị xoá sau này, và nhật
+          // ký mất danh tính là nhật ký vô dụng.
           actorEmail: entry.actorEmail ?? null,
-          metadata: entry.metadata,
+          // Ép kiểu ở đúng một chỗ. An toàn vì Prisma tự serialize sang JSON,
+          // và giá trị không serialize được (hàm, BigInt) sẽ lỗi ngay tại đây —
+          // trong một hàm vốn đã nuốt lỗi và không chặn nghiệp vụ.
+          metadata: entry.metadata as Prisma.InputJsonValue | undefined,
           ip: entry.ip ?? null,
           userAgent: entry.userAgent ?? null,
         },
       });
     } catch (error) {
-      // Vẫn phải để lại dấu vết ở đâu đó — log ứng dụng là nơi cuối cùng.
-      logger.error("Không ghi được nhật ký thao tác", error, {
+      logger.error("Không ghi được nhật ký kiểm toán", error, {
         action: entry.action,
         entity: entry.entity,
-        entityId: entry.entityId,
       });
     }
   }
 
-  /**
-   * Bản NÉM LỖI khi ghi thất bại.
-   *
-   * Dùng cho những thao tác mà "không có nhật ký" là không chấp nhận được —
-   * nghiệp vụ tiền bạc, hoặc yêu cầu tuân thủ. Gọi trong cùng transaction với
-   * thao tác chính để hoặc cả hai cùng thành công, hoặc cả hai cùng huỷ.
-   */
-  async recordOrThrow(entry: AuditEntry, tx?: Prisma.TransactionClient): Promise<void> {
-    const client = tx ?? prisma;
-
-    await client.auditLog.create({
-      data: {
-        action: entry.action,
-        entity: entry.entity,
-        entityId: entry.entityId ?? null,
-        actorId: entry.actorId ?? null,
-        actorEmail: entry.actorEmail ?? null,
-        metadata: entry.metadata,
-        ip: entry.ip ?? null,
-        userAgent: entry.userAgent ?? null,
-      },
-    });
-  }
-
-  /**
-   * Đọc nhật ký, mới nhất trước. Phân trang kiểu cursor.
-   *
-   * Cố ý KHÔNG dùng offset: bảng này chỉ tăng, và `OFFSET 10000` buộc Postgres
-   * đọc rồi bỏ đi 10000 dòng ở mỗi lần lật trang.
-   */
-  async list(options: {
-    actorId?: string;
-    entity?: string;
-    entityId?: string;
-    cursor?: string;
-    perPage?: number;
-  }): Promise<{ entries: AuditLogRow[]; nextCursor: string | null }> {
-    const perPage = Math.min(options.perPage ?? 50, 200);
-
-    const rows = await prisma.auditLog.findMany({
-      where: {
-        ...(options.actorId ? { actorId: options.actorId } : {}),
-        ...(options.entity ? { entity: options.entity } : {}),
-        ...(options.entityId ? { entityId: options.entityId } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      // Lấy dư MỘT dòng để biết còn trang sau hay không, mà không phải chạy
-      // thêm một câu `count` trên bảng lớn.
-      take: perPage + 1,
-      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
-    });
-
-    const hasMore = rows.length > perPage;
-    const entries = hasMore ? rows.slice(0, perPage) : rows;
-
-    return {
-      entries,
-      nextCursor: hasMore ? (entries.at(-1)?.id ?? null) : null,
+  async list(input: ListAuditLogsInput) {
+    const where: Prisma.AuditLogWhereInput = {
+      ...(input.actorId ? { actorId: input.actorId } : {}),
+      ...(input.action ? { action: input.action } : {}),
+      ...(input.entity ? { entity: input.entity } : {}),
+      ...(input.entityId ? { entityId: input.entityId } : {}),
+      ...(input.from || input.to
+        ? {
+            createdAt: {
+              ...(input.from ? { gte: input.from } : {}),
+              ...(input.to ? { lte: input.to } : {}),
+            },
+          }
+        : {}),
     };
+
+    const [total, items] = await Promise.all([
+      this.db.auditLog.count({ where }),
+      this.db.auditLog.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        ...toPrismaPage(input),
+      }),
+    ]);
+
+    return { items, meta: buildPaginationMeta(total, input) };
   }
 
   /**
-   * Xoá bản ghi cũ hơn N ngày.
+   * Xoá nhật ký cũ hơn `days` ngày.
    *
-   * Gọi định kỳ bằng cron — bảng này chỉ tăng. Giữ bao lâu là quyết định
-   * nghiệp vụ: 90 ngày đủ cho vận hành, nhưng yêu cầu tuân thủ có thể đòi
-   * nhiều năm. Đừng hạ con số xuống chỉ vì database đang đầy.
+   * Bảng này chỉ tăng. Giữ bao lâu là quyết định của từng dự án — mặc định 365
+   * ngày là mức thường gặp trong các yêu cầu kiểm toán, nhưng hãy đối chiếu với
+   * quy định áp dụng cho bạn trước khi đổi.
    */
-  async purgeOlderThan(days: number): Promise<number> {
-    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
-    const result = await prisma.auditLog.deleteMany({
-      where: { createdAt: { lt: cutoff } },
+  async purgeOlderThan(days = 365): Promise<number> {
+    const result = await this.db.auditLog.deleteMany({
+      where: { createdAt: { lt: new Date(Date.now() - days * 24 * 60 * 60 * 1000) } },
     });
-
     return result.count;
   }
 }
 
-export type AuditLogRow = Prisma.AuditLogGetPayload<object>;
-
+/**
+ * Instance dùng chung cho toàn ứng dụng.
+ *
+ * Constructor nhận `prisma` làm THAM SỐ MẶC ĐỊNH chứ không import cứng: chỗ
+ * gọi không phải đổi gì, mà test vẫn tiêm được database giả thay vì phải mock
+ * cả module `@/lib/prisma`.
+ */
 export const auditService = new AuditService();

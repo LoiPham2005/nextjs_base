@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { requirePermission } from "@/lib/auth";
-import { PERMISSIONS, PERMISSION_DESCRIPTIONS } from "@/lib/permissions";
+import { PERMISSIONS, PERMISSION_METADATA , type Permission } from "@/lib/permissions";
 import { permissionService } from "@/services/permission.service";
 import { roleService } from "@/services/role.service";
 import { RoleCreateForm } from "./role-create-form";
@@ -27,12 +27,12 @@ export default async function RolesPage() {
 
   const [roles, canUpdate, canCreate, canDelete] = await Promise.all([
     roleService.list(),
-    permissionService.can(currentUser.role, "role:update"),
-    permissionService.can(currentUser.role, "role:create"),
-    permissionService.can(currentUser.role, "role:delete"),
+    permissionService.can(currentUser.id, "role:update"),
+    permissionService.can(currentUser.id, "role:create"),
+    permissionService.can(currentUser.id, "role:delete"),
   ]);
 
-  const options = PERMISSIONS.map((key) => ({ key, description: PERMISSION_DESCRIPTIONS[key] }));
+  const options = PERMISSIONS.map((key) => ({ key, description: PERMISSION_METADATA[key].description }));
 
   return (
     <>
@@ -93,7 +93,7 @@ export default async function RolesPage() {
 
           <RolePermissionForm
             roleKey={role.key}
-            granted={role.permissions}
+            granted={role.permissions as Permission[]}
             options={options}
             disabled={!canUpdate}
           />

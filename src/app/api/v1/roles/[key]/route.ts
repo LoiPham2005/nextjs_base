@@ -52,7 +52,7 @@ export async function DELETE(request: Request, { params }: RouteContext) {
 
     // Luật "không xoá vai trò hệ thống" và "không xoá vai trò còn người dùng"
     // do service giữ; handleApiError đổi chúng thành 409.
-    await roleService.delete(key);
+    await roleService.remove(key);
 
     return apiOk({ key });
   } catch (error) {

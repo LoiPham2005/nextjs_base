@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ROLE_PERMISSIONS,
   PERMISSIONS,
-  PERMISSION_DESCRIPTIONS,
+  PERMISSION_METADATA,
   SYSTEM_ROLES,
   isKnownPermission,
 } from "./permissions";
@@ -27,7 +27,7 @@ describe("danh mục PERMISSIONS", () => {
     // Thiếu mô tả thì giao diện phân quyền hiện ra một ô trống, và người quản
     // trị phải đoán xem mình đang tick vào cái gì.
     for (const permission of PERMISSIONS) {
-      expect(PERMISSION_DESCRIPTIONS[permission], `thiếu mô tả: ${permission}`).toBeTruthy();
+      expect(PERMISSION_METADATA[permission].description, `thiếu mô tả: ${permission}`).toBeTruthy();
     }
   });
 });

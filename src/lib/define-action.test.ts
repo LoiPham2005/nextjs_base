@@ -15,7 +15,7 @@ import { getSession } from "@/lib/auth";
 import { permissionService } from "@/services/permission.service";
 import { defineAction, defineAuthedAction } from "./define-action";
 
-const session = { sub: "u-1", email: "a@b.com", role: "KE_TOAN" };
+const session = { sub: "u-1", email: "a@b.com", typ: "access" as const, roles: ["KE_TOAN"] };
 
 beforeEach(() => {
   vi.clearAllMocks();

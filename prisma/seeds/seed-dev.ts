@@ -1,96 +1,66 @@
 import type { PrismaClient } from "@prisma/client";
-import { CryptoUtils } from "../../src/lib/crypto";
-import { SYSTEM_ROLES } from "../../src/lib/permissions";
-import { seedProd } from "./seed-prod";
-
-const DEV_PASSWORD = "devpassword123";
+import { SYSTEM_ROLES } from "@/lib/permissions";
+import { hash } from "@node-rs/argon2";
 
 /**
- * Dữ liệu mẫu cho dev/test. Chặn cứng ở production — mật khẩu bên dưới là
- * hằng số công khai nằm trong source.
+ * Dữ liệu mẫu cho môi trường DEV.
+ *
+ * KHÔNG BAO GIỜ chạy trên production — mật khẩu ở đây nằm công khai trong mã
+ * nguồn. `seed.ts` chặn điều đó bằng `NODE_ENV`.
  */
-export async function seedDev(prisma: PrismaClient) {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("Không được chạy dev seed trên production.");
-  }
+const DEV_PASSWORD = "matkhau123";
 
-  console.log("🚀 [DEV SEED] Nạp dữ liệu phát triển…");
+const DEV_USERS = [
+  { email: "admin@dev.local", fullName: "Quản trị viên Dev", role: SYSTEM_ROLES.ADMIN },
+  { email: "manager@dev.local", fullName: "Quản lý Dev", role: SYSTEM_ROLES.MANAGER },
+  { email: "staff@dev.local", fullName: "Nhân viên Dev", role: SYSTEM_ROLES.STAFF },
+  { email: "user@dev.local", fullName: "Người dùng Dev", role: SYSTEM_ROLES.USER },
+];
 
-  // Đảm bảo tài khoản admin nền tồn tại trước.
-  await seedProd(prisma);
+export async function seedDev(prisma: PrismaClient): Promise<void> {
+  // Băm MỘT LẦN rồi dùng lại cho cả bốn tài khoản: Argon2id cố tình tốn ~100ms
+  // mỗi lần, và ở đây tất cả đều dùng chung một mật khẩu nên băm lại là lãng
+  // phí thuần tuý.
+  const password = await hash(DEV_PASSWORD, {
+    algorithm: 2,
+    memoryCost: 19456,
+    timeCost: 2,
+    parallelism: 1,
+  });
 
-  const password = await CryptoUtils.hashPassword(DEV_PASSWORD);
-
-  const mockUsers = [
-    {
-      email: "user1@example.com",
-      username: "vana",
-      fullName: "Nguyễn Văn A",
-      roleKey: SYSTEM_ROLES.USER,
-    },
-    {
-      email: "user2@example.com",
-      username: "thib",
-      fullName: "Trần Thị B",
-      roleKey: SYSTEM_ROLES.USER,
-    },
-    {
-      email: "manager@example.com",
-      username: "manager",
-      fullName: "Trần Quản Lý",
-      roleKey: SYSTEM_ROLES.MANAGER,
-    },
-    {
-      email: "staff@example.com",
-      username: "staff",
-      fullName: "Lê Nhân Viên",
-      roleKey: SYSTEM_ROLES.STAFF,
-    },
-    {
-      email: "dev.admin@example.com",
-      username: "devadmin",
-      fullName: "Dev Manager",
-      roleKey: SYSTEM_ROLES.ADMIN,
-    },
-    {
-      email: "test.user@example.com",
-      username: "tester",
-      fullName: "Tester Demo",
-      roleKey: SYSTEM_ROLES.USER,
-    },
-  ];
-
-  // Tra id vai trò một lần rồi dùng lại, thay vì mỗi user một truy vấn.
-  const roles = await prisma.role.findMany({ select: { id: true, key: true } });
-  const roleIdByKey = new Map(roles.map((role) => [role.key, role.id]));
-
-  for (const user of mockUsers) {
-    const roleId = roleIdByKey.get(user.roleKey);
-    if (!roleId) throw new Error(`Thiếu vai trò "${user.roleKey}" — seedRbac chưa chạy?`);
-
-    const created = await prisma.user.upsert({
-      where: { email: user.email },
-      update: {},
-      create: {
-        email: user.email,
-        username: user.username,
-        password,
-        roleId,
-        profile: {
-          create: {
-            fullName: user.fullName,
-          },
-        },
-        userRoles: {
-          create: {
-            roleId,
-          },
-        },
-      },
-      select: { email: true, profile: { select: { fullName: true } } },
+  for (const item of DEV_USERS) {
+    const role = await prisma.role.findUniqueOrThrow({
+      where: { key: item.role },
+      select: { id: true },
     });
-    console.log(` └─ ${created.email} (${created.profile?.fullName ?? "—"})`);
+
+    // `upsert` cần một khoá DUY NHẤT mà Prisma biết, nhưng `email` được ràng
+    // buộc bằng partial unique index viết tay (xem model `User`). Nên: tìm
+    // trước, tạo sau.
+    const existing = await prisma.user.findFirst({
+      where: { email: item.email, deletedAt: null },
+      select: { id: true },
+    });
+
+    const user =
+      existing ??
+      (await prisma.user.create({
+        data: {
+          email: item.email,
+          password,
+          emailVerifiedAt: new Date(),
+          status: "ACTIVE",
+          profile: { create: { fullName: item.fullName } },
+        },
+        select: { id: true },
+      }));
+
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId: user.id, roleId: role.id } },
+      update: {},
+      create: { userId: user.id, roleId: role.id },
+    });
   }
 
-  console.log(`✅ [DEV SEED] Xong ${mockUsers.length} user mẫu. Mật khẩu: ${DEV_PASSWORD}`);
+  console.log(`✓ Đã tạo ${DEV_USERS.length} tài khoản dev (mật khẩu chung: ${DEV_PASSWORD})`);
 }

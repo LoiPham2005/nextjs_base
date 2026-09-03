@@ -34,9 +34,9 @@ export async function POST(request: Request) {
 
     const accessToken = await signSession(
       {
-        sub: rotated.owner.userId,
-        email: rotated.owner.email,
-        role: rotated.owner.role,
+        sub: rotated.userId,
+        email: rotated.user.email,
+        roles: rotated.user.roles,
       },
       ACCESS_TOKEN_MAX_AGE_SECONDS,
     );

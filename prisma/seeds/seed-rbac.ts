@@ -3,95 +3,76 @@ import {
   DEFAULT_ROLE_PERMISSIONS,
   PERMISSIONS,
   PERMISSION_METADATA,
-} from "../../src/lib/permissions";
+  resolveSeedPermissions,
+} from "@/lib/permissions";
 
 /**
- * Đồng bộ danh mục quyền và vai trò hệ thống từ code xuống database.
+ * Đồng bộ danh mục quyền và vai trò hệ thống TỪ CODE xuống database.
  *
- * Chạy được nhiều lần, và phải chạy đầu tiên trong mọi bộ seed — không có vai
- * trò thì không tạo được user nào.
+ * Chạy được nhiều lần, và PHẢI chạy đầu tiên trong mọi bộ seed — không có vai
+ * trò thì không tạo được người dùng nào.
  *
  * ---
  * NGUYÊN TẮC: CHỈ THÊM, KHÔNG GHI ĐÈ
  *
- * Đây là điểm quan trọng nhất của file này. Quyền được gán cho vai trò là thứ
- * quản trị viên chỉnh sửa trên giao diện. Nếu seed ghi đè lại theo
- * `DEFAULT_ROLE_PERMISSIONS`, thì mỗi lần deploy sẽ xoá sạch công sức cấu hình
+ * Đây là điểm quan trọng nhất của file này. Quyền gán cho vai trò là thứ quản
+ * trị viên chỉnh sửa trên giao diện. Nếu seed ghi đè lại theo
+ * `DEFAULT_ROLE_PERMISSIONS` thì mỗi lần deploy sẽ xoá sạch công sức cấu hình
  * của khách hàng — và không ai hiểu vì sao phân quyền "tự nhiên quay về như cũ".
  *
  * Nên: quyền còn thiếu thì thêm vào, quyền đã bị gỡ bỏ có chủ đích thì để yên.
  */
-export async function seedRbac(prisma: PrismaClient) {
-  // 1. Danh mục quyền. Nguồn sự thật là hằng PERMISSIONS trong code.
+export async function seedRbac(prisma: PrismaClient): Promise<void> {
+  // 1. Danh mục quyền. Nguồn sự thật là hằng PERMISSIONS trong code, nên ở đây
+  //    ghi đè phần mô tả là ĐÚNG — đó là dữ liệu của code, không phải của người
+  //    dùng.
   for (const key of PERMISSIONS) {
     const meta = PERMISSION_METADATA[key];
     await prisma.permission.upsert({
       where: { key },
-      update: {
-        name: meta.name,
-        category: meta.category,
-        description: meta.description,
-      },
-      create: {
-        key,
-        name: meta.name,
-        category: meta.category,
-        description: meta.description,
-      },
+      update: { name: meta.name, category: meta.category, description: meta.description },
+      create: { key, name: meta.name, category: meta.category, description: meta.description },
     });
   }
 
-  // 2. Quyền đã bị xoá khỏi code nhưng còn sót trong database.
-  //
-  // Không xoá tự động: hàng phân quyền tham chiếu tới nó sẽ biến mất theo dây
-  // chuyền, và nếu quyền được thêm lại ở bản sau thì cấu hình đã mất rồi.
-  // Chỉ cảnh báo để người vận hành tự quyết.
-  const orphans = await prisma.permission.findMany({
-    where: { key: { notIn: [...PERMISSIONS] } },
-    select: { key: true },
-  });
-
-  if (orphans.length > 0) {
-    console.warn(
-      `⚠️  ${orphans.length} quyền có trong database nhưng không còn trong code: ` +
-        `${orphans.map((permission) => permission.key).join(", ")}\n` +
-        `    Chúng bị bỏ qua khi kiểm tra quyền. Xoá tay nếu chắc chắn không dùng lại.`,
-    );
-  }
-
-  // 3. Vai trò hệ thống và bộ quyền mặc định.
-  for (const role of DEFAULT_ROLE_PERMISSIONS) {
-    const saved = await prisma.role.upsert({
-      where: { key: role.key },
-      // Không đụng tới `name` và `description` của vai trò đã tồn tại: khách
-      // hàng có thể đã đổi tên hiển thị cho hợp với cách gọi của họ.
-      update: {},
+  // 2. Vai trò hệ thống.
+  for (const seed of DEFAULT_ROLE_PERMISSIONS) {
+    const role = await prisma.role.upsert({
+      where: { key: seed.key },
+      // KHÔNG đụng vào `name`/`description` nếu vai trò đã tồn tại: khách hàng
+      // có thể đã đổi tên hiển thị cho hợp ngữ cảnh của họ.
+      //
+      // `level` thì NGƯỢC LẠI — luôn đồng bộ từ code. Nó không phải nhãn hiển
+      // thị mà là ràng buộc bảo mật: bậc của SUPER_ADMIN bị ai đó hạ xuống 5
+      // nghĩa là mọi ADMIN đều thao tác được lên tài khoản quản trị tối cao.
+      // Thứ như vậy phải có đúng một nguồn sự thật, và nó nằm trong code.
+      update: { isSystem: true, level: seed.level },
       create: {
-        key: role.key,
-        name: role.name,
-        description: role.description,
+        key: seed.key,
+        name: seed.name,
+        description: seed.description,
+        level: seed.level,
         isSystem: true,
       },
+      select: { id: true },
     });
 
-    for (const permissionKey of role.permissions) {
-      const permission = await prisma.permission.findUniqueOrThrow({
-        where: { key: permissionKey },
-        select: { id: true },
-      });
+    const wanted = resolveSeedPermissions(seed);
+    const permissions = await prisma.permission.findMany({
+      where: { key: { in: [...wanted] } },
+      select: { id: true },
+    });
 
-      await prisma.rolePermission.upsert({
-        where: {
-          roleId_permissionId: { roleId: saved.id, permissionId: permission.id },
-        },
-        update: {},
-        create: { roleId: saved.id, permissionId: permission.id },
-      });
-    }
+    // `skipDuplicates` là thứ làm cho "chỉ thêm, không ghi đè" thành sự thật:
+    // dòng đã có thì bỏ qua, và dòng admin đã gỡ đi thì... vẫn được thêm lại.
+    //
+    // ⚠️ Đó là giới hạn đã biết: seed không phân biệt được "chưa từng có" với
+    // "đã bị gỡ có chủ đích". Nếu dự án của bạn cần giữ nguyên các lần gỡ đó,
+    // hãy chỉ chạy `seedRbac` một lần lúc cài đặt, đừng chạy trong mỗi lần
+    // deploy.
+    await prisma.rolePermission.createMany({
+      data: permissions.map((permission) => ({ roleId: role.id, permissionId: permission.id })),
+      skipDuplicates: true,
+    });
   }
-
-  const roleCount = await prisma.role.count();
-  const permissionCount = await prisma.permission.count();
-
-  console.log(`✅ [RBAC SEED] ${roleCount} vai trò, ${permissionCount} quyền`);
 }

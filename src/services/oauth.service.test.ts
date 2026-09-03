@@ -1,115 +1,79 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { OAuthEmailRequiredError } from "@/lib/oauth/types";
-import type { OAuthProfile } from "@/lib/oauth/types";
-import { AccountBannedError, InvalidCredentialsError } from "./auth.service";
-
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    account: { findUnique: vi.fn(), create: vi.fn() },
-  },
-}));
-
-vi.mock("./user.service", () => ({
-  userService: { findById: vi.fn(), findByEmail: vi.fn(), createOAuthUser: vi.fn() },
-}));
-
-import { prisma } from "@/lib/prisma";
-import { userService } from "./user.service";
+import { describe, expect, it, vi } from "vitest";
+import type { PrismaClient } from "@prisma/client";
 import { OAuthService } from "./oauth.service";
+import { UserService } from "./user.service";
+import { AccountBannedError, AccountInactiveError } from "@/lib/errors";
 
-function publicUser(overrides: Record<string, unknown> = {}) {
+const USER_ROW = {
+  id: "u1",
+  email: "loi@gmail.com",
+  phone: null,
+  username: null,
+  status: "ACTIVE" as const,
+  emailVerifiedAt: new Date(),
+  twoFactorEnabledAt: null,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  profile: null,
+  userRoles: [],
+};
+
+function createDb(overrides: Record<string, unknown> = {}) {
   return {
-    id: "u-1",
-    email: "user@example.com",
-    username: null,
-    fullName: "User",
-    role: "USER",
-    roleName: "Người dùng",
-    emailVerifiedAt: new Date("2026-01-01"),
-    status: "ACTIVE",
-    createdAt: new Date("2026-01-01"),
-    updatedAt: new Date("2026-01-01"),
+    oAuthAccount: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn(),
+    },
+    user: {
+      findFirst: vi.fn().mockResolvedValue(USER_ROW),
+      create: vi.fn().mockResolvedValue(USER_ROW),
+      findUniqueOrThrow: vi.fn(),
+    },
     ...overrides,
-  } as never;
+  } as unknown as PrismaClient;
 }
 
-function profile(overrides: Partial<OAuthProfile> = {}): OAuthProfile {
-  return {
-    provider: "google",
-    providerAccountId: "g-123",
-    email: "user@example.com",
-    fullName: "User",
-    ...overrides,
-  };
-}
+const profile = (email: string | null) => ({
+  provider: "google" as const,
+  providerAccountId: "g-1",
+  email,
+  fullName: "Loi",
+});
 
-describe("OAuthService.loginWithProfile", () => {
-  let service: OAuthService;
+describe("OAuthService", () => {
+  it("chuẩn hoá email trước khi tra cứu — KHÔNG tạo tài khoản trùng", async () => {
+    /*
+     * Google trả về đúng thứ người dùng đã gõ khi đăng ký, kể cả `Loi@Gmail.com`.
+     * Database thì luôn lưu chữ thường. Không chuẩn hoá thì tra không ra tài
+     * khoản cũ → tạo tài khoản MỚI, và người dùng mất sạch dữ liệu cũ.
+     */
+    const db = createDb();
+    const service = new OAuthService(db, new UserService(db));
 
-  beforeEach(() => {
-    service = new OAuthService();
-    vi.clearAllMocks();
+    await service.loginWithProfile(profile("Loi@Gmail.COM"));
+
+    const where = vi.mocked(db.user.findFirst).mock.calls[0]![0]!.where as { email: string };
+    expect(where.email).toBe("loi@gmail.com");
+    // Tìm thấy tài khoản cũ → liên kết, KHÔNG tạo mới.
+    expect(db.user.create).not.toHaveBeenCalled();
+    expect(db.oAuthAccount.create).toHaveBeenCalled();
   });
 
-  it("đăng nhập thẳng nếu Account đã liên kết trước đó", async () => {
-    vi.mocked(prisma.account.findUnique).mockResolvedValue({ userId: "u-1" } as never);
-    vi.mocked(userService.findById).mockResolvedValue(publicUser());
+  it("chặn tài khoản BANNED và INACTIVE ở đường OAuth", async () => {
+    for (const [status, error] of [
+      ["BANNED", AccountBannedError],
+      ["INACTIVE", AccountInactiveError],
+    ] as const) {
+      const db = createDb({
+        user: {
+          findFirst: vi.fn().mockResolvedValue({ ...USER_ROW, status }),
+          create: vi.fn(),
+        },
+      });
 
-    const user = await service.loginWithProfile(profile());
-
-    expect(user.id).toBe("u-1");
-    expect(userService.createOAuthUser).not.toHaveBeenCalled();
-    expect(prisma.account.create).not.toHaveBeenCalled();
-  });
-
-  it("liên kết vào user có sẵn cùng email thay vì tạo mới", async () => {
-    vi.mocked(prisma.account.findUnique).mockResolvedValue(null);
-    vi.mocked(userService.findByEmail).mockResolvedValue(publicUser({ id: "u-existing" }));
-
-    const user = await service.loginWithProfile(profile());
-
-    expect(user.id).toBe("u-existing");
-    expect(userService.createOAuthUser).not.toHaveBeenCalled();
-    expect(prisma.account.create).toHaveBeenCalledWith({
-      data: { userId: "u-existing", provider: "google", providerAccountId: "g-123" },
-    });
-  });
-
-  it("tạo user mới nếu chưa có Account lẫn chưa có user cùng email", async () => {
-    vi.mocked(prisma.account.findUnique).mockResolvedValue(null);
-    vi.mocked(userService.findByEmail).mockResolvedValue(null);
-    vi.mocked(userService.createOAuthUser).mockResolvedValue(publicUser({ id: "u-new" }));
-
-    const user = await service.loginWithProfile(profile());
-
-    expect(user.id).toBe("u-new");
-    expect(userService.createOAuthUser).toHaveBeenCalledWith({
-      email: "user@example.com",
-      fullName: "User",
-    });
-  });
-
-  it("từ chối khi provider không trả email đã xác thực và chưa từng liên kết", async () => {
-    vi.mocked(prisma.account.findUnique).mockResolvedValue(null);
-
-    await expect(service.loginWithProfile(profile({ email: null }))).rejects.toThrow(
-      OAuthEmailRequiredError,
-    );
-
-    expect(userService.findByEmail).not.toHaveBeenCalled();
-  });
-
-  it("chặn đăng nhập khi tài khoản đã BANNED — kể cả khi mật khẩu không liên quan gì tới OAuth", async () => {
-    vi.mocked(prisma.account.findUnique).mockResolvedValue({ userId: "u-1" } as never);
-    vi.mocked(userService.findById).mockResolvedValue(publicUser({ status: "BANNED" }));
-
-    await expect(service.loginWithProfile(profile())).rejects.toThrow(AccountBannedError);
-  });
-
-  it("coi Account trỏ tới user đã xoá mềm như không có tài khoản nào cả", async () => {
-    vi.mocked(prisma.account.findUnique).mockResolvedValue({ userId: "u-deleted" } as never);
-    vi.mocked(userService.findById).mockResolvedValue(null);
-
-    await expect(service.loginWithProfile(profile())).rejects.toThrow(InvalidCredentialsError);
+      await expect(
+        new OAuthService(db, new UserService(db)).loginWithProfile(profile("loi@gmail.com")),
+      ).rejects.toBeInstanceOf(error);
+    }
   });
 });

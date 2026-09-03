@@ -1,39 +1,93 @@
-import "server-only";
+import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { userService } from "./user.service";
+import { verificationService } from "./verification.service";
+import { tokenService } from "./token.service";
+import { securityStampService } from "./security-stamp.service";
+import { SYSTEM_ROLES } from "@/lib/permissions";
+import { type LoginInput, type RegisterInput } from "@/schemas/auth.schema";
+import { type PublicUser } from "@/schemas/user.schema";
 import { CryptoUtils } from "@/lib/crypto";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { sendPasswordResetEmail, sendVerificationEmail } from "@/lib/emails";
-import { SYSTEM_ROLES } from "@/lib/permissions";
-import type { LoginInput, RegisterInput } from "@/schemas/auth.schema";
-import { userService, type PublicUser } from "./user.service";
-import { verificationService } from "./verification.service";
-import { tokenService } from "./token.service";
+import {
+  AccountLockedError,
+  DuplicateFieldError,
+  InvalidCredentialsError,
+  InvalidVerificationTokenError,
+  PhoneOtpThrottledError,
+  PhoneVerificationDisabledError,
+  TwoFactorRequiredError,
+  assertLoginAllowed,
+} from "@/lib/errors";
+import {
+  sendEmailChangeNoticeEmail,
+  sendEmailChangeVerificationEmail,
+  sendPasswordChangedEmail,
+  sendPasswordResetEmail,
+  sendVerificationEmail,
+} from "@/lib/emails";
+import { sendPhoneOtpSms } from "@/lib/sms";
+import { isPhoneVerificationEnabled } from "@/lib/smser";
+import { rateLimit } from "@/lib/rate-limit";
+import { UserService, toPublicUser } from "./user.service";
+import type { VerificationService } from "./verification.service";
+import type { TokenService } from "./token.service";
+import type { SecurityStampService } from "./security-stamp.service";
 
+/**
+ * Luồng xác thực: đăng ký, đăng nhập, xác thực email, đặt lại / đổi mật khẩu.
+ *
+ * ⚠️ Service này KHÔNG ký JWT. Việc đó thuộc về `apps/api` (nơi có
+ * `JwtService` của NestJS và biết `JWT_SECRET`) — giữ `packages/core` không
+ * phụ thuộc framework, và nhờ vậy `apps/worker` import được nó mà không phải
+ * khai `JWT_SECRET`.
+ */
 export class AuthService {
+  constructor(
+    private readonly db: PrismaClient = prisma,
+    private readonly users: UserService = userService,
+    private readonly verification: VerificationService = verificationService,
+    private readonly tokens: TokenService = tokenService,
+    private readonly securityStamp: SecurityStampService = securityStampService,
+  ) {}
+
+  /**
+   * Đăng ký công khai.
+   *
+   * Vai trò LUÔN là USER và KHÔNG đọc từ input — nếu đọc, bất kỳ ai gọi
+   * `POST /auth/register` cũng tự phong mình làm ADMIN.
+   */
   async register(input: RegisterInput): Promise<PublicUser> {
-    // Đi qua userService để tái dùng nguyên tắc xử lý trùng email/username và
-    // việc tra vai trò ở đó.
-    return userService.create({
+    const user = await this.users.create({
       email: input.email,
       password: input.password,
       username: input.username,
       fullName: input.fullName,
-      roleKey: SYSTEM_ROLES.USER,
+      status: "ACTIVE",
+      roleKeys: [SYSTEM_ROLES.USER],
     });
+
+    // Gửi thư xác thực nhưng KHÔNG chặn việc đăng ký nếu gửi hỏng: tài khoản
+    // đã tạo xong rồi, ném lỗi ở đây chỉ khiến người dùng thấy "đăng ký thất
+    // bại" cho một thao tác thật ra đã thành công. Họ bấm "gửi lại" được.
+    await this.sendEmailVerification(user.id).catch((error: unknown) => {
+      logger.error("Không gửi được email xác thực sau khi đăng ký", error, { userId: user.id });
+    });
+
+    return user;
   }
 
   /**
    * Xác thực thông tin đăng nhập.
    *
-   * Ba nhánh thất bại — email không tồn tại, tài khoản chưa đặt mật khẩu, sai
-   * mật khẩu — đều ném cùng một lỗi và đều tiêu tốn thời gian như nhau. Nếu
-   * không, chỉ cần đo thời gian phản hồi là biết được email nào đã đăng ký.
+   * Ba nhánh thất bại — không tìm thấy tài khoản, tài khoản chưa đặt mật khẩu,
+   * sai mật khẩu — đều ném CÙNG một lỗi và đều tiêu tốn thời gian như nhau.
+   * Nếu không, chỉ cần đo thời gian phản hồi là biết được email nào đã đăng ký.
    *
-   * Tài khoản BANNED hoặc đang lockedUntil chỉ bị tiết lộ SAU KHI mật khẩu đã
-   * đúng — xem `registerFailedAttempt`. Tiết lộ trước khi xác minh mật khẩu là
-   * một oracle: kẻ dò mật khẩu mù sẽ biết tài khoản nào tồn tại/đã bị khoá mà
-   * không cần đoán trúng gì.
+   * Tài khoản BANNED hoặc đang `lockedUntil` chỉ bị tiết lộ SAU KHI mật khẩu đã
+   * đúng. Tiết lộ trước là một oracle: kẻ dò mật khẩu mù sẽ biết tài khoản nào
+   * tồn tại/đã bị khoá mà không cần đoán trúng gì.
    */
   async validateCredentials(input: LoginInput): Promise<PublicUser> {
     // Ký tự `@` là thứ duy nhất phân biệt được hai loại: `usernameSchema` cấm
@@ -41,23 +95,26 @@ export class AuthService {
     const identifier = input.identifier.trim().toLowerCase();
     const isEmail = identifier.includes("@");
 
-    const user = await prisma.user.findUnique({
-      where: isEmail
-        ? { email: identifier, deletedAt: null }
-        : { username: identifier, deletedAt: null },
+    const user = await this.db.user.findFirst({
+      where: {
+        deletedAt: null,
+        ...(isEmail ? { email: identifier } : { username: identifier }),
+      },
       select: {
         id: true,
         email: true,
+        phone: true,
         username: true,
-        fullName: true,
         password: true,
-        emailVerifiedAt: true,
         status: true,
+        emailVerifiedAt: true,
         failedLoginAttempts: true,
         lockedUntil: true,
+        twoFactorEnabledAt: true,
         createdAt: true,
         updatedAt: true,
-        role: { select: { key: true, name: true } },
+        profile: { select: { fullName: true, avatarUrl: true } },
+        userRoles: { select: { role: { select: { key: true } } } },
       },
     });
 
@@ -76,51 +133,83 @@ export class AuthService {
       throw new InvalidCredentialsError();
     }
 
-    if (user.status === "BANNED") {
-      throw new AccountBannedError();
-    }
+    assertLoginAllowed(user.status);
 
     if (user.lockedUntil && user.lockedUntil > new Date()) {
       throw new AccountLockedError(user.lockedUntil);
     }
 
-    // Đăng nhập đúng sau một chuỗi lần sai trước đó — xoá dấu vết, đừng bắt họ
-    // trả giá cho những lần gõ nhầm đã qua.
+    // Đăng nhập đúng sau một chuỗi lần sai — xoá dấu vết, đừng bắt họ trả giá
+    // cho những lần gõ nhầm đã qua.
     if (user.failedLoginAttempts > 0) {
-      await prisma.user.update({
+      await this.db.user.update({
         where: { id: user.id },
         data: { failedLoginAttempts: 0, lockedUntil: null },
       });
     }
 
-    if (check.needsRehash) {
-      await this.upgradePasswordHash(user.id, input.password);
-    }
+    if (check.needsRehash) await this.upgradePasswordHash(user.id, input.password);
 
-    const { password: _password, failedLoginAttempts: _failedLoginAttempts, role, ...rest } = user;
-    return { ...rest, role: role.key, roleName: role.name };
+    /*
+     * ĐÂY LÀ CỔNG 2FA.
+     *
+     * Đặt SAU mọi phép kiểm khác có chủ đích: chỉ người đã nhập đúng mật khẩu
+     * mới được biết tài khoản này có bật 2FA hay không. Kiểm sớm hơn là biến
+     * endpoint đăng nhập thành công cụ dò xem ai đã bật 2FA — thông tin rất
+     * hữu ích cho việc chọn mục tiêu.
+     *
+     * NÉM LỖI thay vì trả về một cờ: nơi gọi KHÔNG THỂ vô tình quên xử lý một
+     * exception, còn một trường `twoFactorRequired: true` trong object trả về
+     * thì quên rất dễ — và quên nghĩa là 2FA bị bỏ qua hoàn toàn.
+     */
+    if (user.twoFactorEnabledAt) throw new TwoFactorRequiredError(user.id);
+
+    const {
+      password: _password,
+      failedLoginAttempts: _attempts,
+      lockedUntil: _locked,
+      ...rest
+    } = user;
+    return toPublicUser(rest);
+  }
+
+  /**
+   * Lấy hồ sơ công khai SAU KHI đã vượt qua 2FA.
+   *
+   * Tách riêng vì `validateCredentials` cố tình ném lỗi với tài khoản có 2FA
+   * nên không trả về user được. Ở đây mật khẩu đã đúng và mã đã đúng — chỉ còn
+   * kiểm lại trạng thái tài khoản, phòng trường hợp nó bị khoá trong khoảng
+   * vài giây giữa hai bước.
+   */
+  async completeTwoFactorLogin(userId: string): Promise<PublicUser> {
+    const user = await this.users.findById(userId);
+    if (!user) throw new InvalidCredentialsError();
+
+    assertLoginAllowed(user.status);
+
+    return user;
   }
 
   /**
    * Tăng bộ đếm sai mật khẩu; khoá tạm khi chạm ngưỡng.
    *
-   * Bổ sung cho rate-limit theo IP (`enforceRateLimit`): rate-limit chặn một
-   * IP dò nhiều tài khoản, còn cái này chặn nhiều IP cùng dò một tài khoản.
+   * Bổ sung cho rate-limit theo IP: rate-limit chặn MỘT IP dò NHIỀU tài khoản,
+   * còn cái này chặn NHIỀU IP cùng dò MỘT tài khoản.
    *
-   * Không tăng/khoá lại nếu đã đang bị khoá — tránh một loạt request tới
+   * Không tăng/khoá lại nếu đã đang bị khoá — tránh việc một loạt request tới
    * trong lúc khoá cứ đẩy `lockedUntil` lùi thêm vô hạn.
    */
   private async registerFailedAttempt(userId: string, alreadyLocked: boolean): Promise<void> {
     if (alreadyLocked) return;
 
-    const updated = await prisma.user.update({
+    const updated = await this.db.user.update({
       where: { id: userId },
       data: { failedLoginAttempts: { increment: 1 } },
       select: { failedLoginAttempts: true },
     });
 
     if (updated.failedLoginAttempts >= env.LOGIN_MAX_FAILED_ATTEMPTS) {
-      await prisma.user.update({
+      await this.db.user.update({
         where: { id: userId },
         data: {
           failedLoginAttempts: 0,
@@ -131,137 +220,354 @@ export class AuthService {
   }
 
   /**
-   * Băm lại mật khẩu bằng thuật toán hiện hành và ghi đè.
+   * Băm lại mật khẩu bằng THAM SỐ hiện hành và ghi đè.
    *
-   * Đây là cách chuyển dần kho mật khẩu cũ (bcrypt) sang Argon2id mà không bắt
-   * ai đổi mật khẩu: mỗi lần đăng nhập thành công là một bản ghi được nâng cấp.
+   * Chạy khi bạn siết tham số Argon2 (ví dụ nâng `memoryCost` để theo kịp phần
+   * cứng mới): mỗi lần đăng nhập thành công là một bản ghi được nâng cấp, và
+   * không ai phải đổi mật khẩu.
    *
-   * Lỗi ở đây bị nuốt có chủ đích. Người dùng vừa nhập đúng mật khẩu — chặn họ
+   * Lỗi ở đây bị nuốt CÓ CHỦ ĐÍCH. Người dùng vừa nhập đúng mật khẩu — chặn họ
    * đăng nhập chỉ vì thao tác nâng cấp nền phía sau thất bại là hành vi sai.
-   * Lần đăng nhập sau sẽ thử lại.
    */
   private async upgradePasswordHash(userId: string, plainPassword: string): Promise<void> {
     try {
       const password = await CryptoUtils.hashPassword(plainPassword);
-      await prisma.user.update({ where: { id: userId }, data: { password } });
+      await this.db.user.update({ where: { id: userId }, data: { password } });
     } catch (error) {
       logger.error("Không nâng cấp được hash mật khẩu", error, { userId });
     }
   }
 
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
   // Xác thực email
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
 
   /**
-   * Cấp token xác thực và gửi email.
-   *
-   * Không làm gì nếu email đã được xác thực — tránh việc bấm nhầm nút "gửi lại"
-   * làm mất hiệu lực trạng thái đang đúng.
+   * Cấp token xác thực và gửi email. Không làm gì nếu email đã được xác thực —
+   * tránh việc bấm nhầm nút "gửi lại" làm mất hiệu lực trạng thái đang đúng.
    */
   async sendEmailVerification(userId: string): Promise<void> {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
+    const user = await this.db.user.findFirst({
+      where: { id: userId, deletedAt: null },
       select: { id: true, email: true, emailVerifiedAt: true },
     });
 
-    if (!user || user.emailVerifiedAt) return;
+    if (!user?.email || user.emailVerifiedAt) return;
 
-    const { token } = await verificationService.issue(user.id, "EMAIL_VERIFICATION");
+    const { token } = await this.verification.issue(user.id, "EMAIL_VERIFICATION");
     await sendVerificationEmail(user.email, token);
+  }
+
+  /**
+   * Gửi lại thư xác thực theo địa chỉ email.
+   *
+   * KHÔNG bao giờ tiết lộ email có tồn tại hay không — endpoint này công khai,
+   * và bất kỳ khác biệt nào cũng biến nó thành công cụ dò danh sách người dùng.
+   */
+  async resendEmailVerification(email: string): Promise<void> {
+    const user = await this.users.findByEmail(email);
+    if (!user) return;
+    await this.sendEmailVerification(user.id);
   }
 
   /**
    * Xác thực email bằng token trong link.
    *
-   * Ghi `emailVerifiedAt` chỉ khi nó đang null. Người dùng bấm lại link cũ sau
+   * Ghi `emailVerifiedAt` CHỈ KHI nó đang null: người dùng bấm lại link cũ sau
    * khi đã xác thực thì không được ghi đè mốc thời gian ban đầu.
    */
   async verifyEmail(token: string): Promise<PublicUser> {
-    const userId = await verificationService.consume(token, "EMAIL_VERIFICATION");
-    if (!userId) throw new InvalidVerificationTokenError();
+    const consumed = await this.verification.consume(token, "EMAIL_VERIFICATION");
+    if (!consumed) throw new InvalidVerificationTokenError();
 
-    await prisma.user.updateMany({
-      where: { id: userId, emailVerifiedAt: null },
+    await this.db.user.updateMany({
+      where: { id: consumed.userId, emailVerifiedAt: null },
       data: { emailVerifiedAt: new Date() },
     });
 
-    const user = await userService.findById(userId);
+    const user = await this.users.findById(consumed.userId);
     if (!user) throw new InvalidVerificationTokenError();
 
     return user;
   }
 
-  // ---------------------------------------------------------------------------
-  // Đặt lại mật khẩu
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Đặt lại / đổi mật khẩu
+  // -------------------------------------------------------------------------
 
   /**
    * Gửi link đặt lại mật khẩu.
    *
-   * ⚠️ KHÔNG BAO GIỜ báo cho bên gọi biết email có tồn tại hay không. Endpoint
-   * này công khai, nên bất kỳ khác biệt nào — giá trị trả về, mã lỗi, hay chỉ
-   * là thời gian phản hồi — đều biến nó thành công cụ dò danh sách người dùng.
+   * ⚠️ KHÔNG BAO GIỜ báo cho bên gọi biết email có tồn tại hay không.
    *
-   * Tài khoản chưa đặt mật khẩu (tạo bởi admin, hoặc đăng nhập qua OAuth) vẫn
-   * được cấp link: đó chính là cách hợp lệ để họ đặt mật khẩu lần đầu.
+   * Tài khoản chưa đặt mật khẩu (admin tạo hộ, hoặc chỉ đăng nhập qua OAuth)
+   * VẪN được cấp link: đó chính là cách hợp lệ để họ đặt mật khẩu lần đầu.
    */
   async requestPasswordReset(email: string): Promise<void> {
-    // Đi qua `userService.findByEmail` thay vì tự viết truy vấn, vì nó giữ hai
-    // luật mà chỗ này từng bỏ sót — và cả hai đều hỏng trong im lặng:
-    //
-    //   1. Chuẩn hoá email. Email lưu ở dạng chữ thường, nên tra bằng chuỗi
-    //      thô làm `Loi@X.com` không khớp dòng nào. Endpoint luôn trả 200 theo
-    //      thiết kế, nên người dùng chỉ thấy "đã gửi" rồi đợi mãi một lá thư
-    //      không tồn tại.
-    //   2. Bỏ qua tài khoản đã xoá mềm. Không lọc `deletedAt` thì tài khoản đã
-    //      xoá vẫn nhận được link đặt lại mật khẩu — một đường quay lại cho
-    //      thứ lẽ ra đã bị đóng.
-    const user = await userService.findByEmail(email);
+    // Đi qua `users.findByEmail` thay vì tự viết truy vấn, vì nó giữ hai luật
+    // mà chỗ này rất dễ bỏ sót — và cả hai đều hỏng trong im lặng: chuẩn hoá
+    // chữ thường, và bỏ qua tài khoản đã xoá mềm.
+    const user = await this.users.findByEmail(email);
+    if (!user?.email) return;
 
-    if (!user) return;
-
-    const { token } = await verificationService.issue(user.id, "PASSWORD_RESET");
+    const { token } = await this.verification.issue(user.id, "PASSWORD_RESET");
     await sendPasswordResetEmail(user.email, token);
   }
 
   /**
    * Đặt mật khẩu mới bằng token trong link.
    *
-   * Thu hồi TOÀN BỘ refresh token của tài khoản sau khi đổi. Đây là phần bắt
-   * buộc, không phải tuỳ chọn: kịch bản điển hình của luồng này là tài khoản đã
-   * bị chiếm. Đổi mật khẩu mà để phiên cũ của kẻ tấn công còn sống thì việc đổi
-   * gần như vô nghĩa.
-   *
-   * Cookie phiên web không thu hồi được từ đây (JWT đã ký), nhưng hạn của nó
-   * ngắn hơn nhiều và nơi gọi nên xoá cookie hiện tại — xem route handler.
+   * Thu hồi TOÀN BỘ refresh token sau khi đổi. Đây là phần bắt buộc, không phải
+   * tuỳ chọn: kịch bản điển hình của luồng này là tài khoản đã bị chiếm. Đổi
+   * mật khẩu mà để phiên cũ của kẻ tấn công còn sống thì việc đổi gần như vô
+   * nghĩa.
    */
-  async resetPassword(token: string, newPassword: string): Promise<void> {
-    const userId = await verificationService.consume(token, "PASSWORD_RESET");
-    if (!userId) throw new InvalidVerificationTokenError();
+  async resetPassword(token: string, newPassword: string): Promise<string> {
+    const consumed = await this.verification.consume(token, "PASSWORD_RESET");
+    if (!consumed) throw new InvalidVerificationTokenError();
 
+    const userId = consumed.userId;
     const password = await CryptoUtils.hashPassword(newPassword);
 
-    await prisma.user.update({ where: { id: userId }, data: { password } });
-    await tokenService.revokeAllForUser(userId);
+    const user = await this.db.user.update({
+      where: { id: userId },
+      data: {
+        password,
+        passwordChangedAt: new Date(),
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+      select: { id: true, email: true },
+    });
+
+    await this.tokens.revokeAllForUser(userId);
+    // Refresh token đã thu hồi ở trên, nhưng access token đang cầm thì chưa —
+    // dòng này mới là thứ đá kẻ tấn công ra NGAY thay vì sau 15 phút.
+    await this.securityStamp.invalidate(userId);
+
+    if (user.email) {
+      await sendPasswordChangedEmail(user.email).catch((error: unknown) => {
+        logger.error("Không gửi được email thông báo đổi mật khẩu", error, { userId });
+      });
+    }
 
     logger.info("Mật khẩu được đặt lại", { userId });
+    return userId;
+  }
+
+  // -------------------------------------------------------------------------
+  // Đổi địa chỉ email
+  // -------------------------------------------------------------------------
+
+  /**
+   * Bước 1: xin đổi sang một địa chỉ email mới.
+   *
+   * ---
+   * VÌ SAO KHÔNG GHI THẲNG VÀO `user.email`
+   *
+   * Đổi email là đường chiếm tài khoản kinh điển: chiếm được phiên đăng nhập
+   * một lúc, đổi email sang địa chỉ của mình, rồi dùng "quên mật khẩu" để
+   * chiếm vĩnh viễn. Chủ thật mất tài khoản mà không nhận được thông báo nào.
+   *
+   * Nên có ba chốt:
+   *   1. Bắt nhập lại MẬT KHẨU hiện tại.
+   *   2. Địa chỉ MỚI phải tự xác thực (link gửi tới đó) trước khi thay thế.
+   *   3. Địa chỉ CŨ được gửi thư báo NGAY — đó là tín hiệu duy nhất mà chủ
+   *      thật nhận được nếu tài khoản đã bị chiếm.
+   */
+  async requestEmailChange(userId: string, newEmail: string, password: string): Promise<void> {
+    const normalized = newEmail.trim().toLowerCase();
+
+    const user = await this.db.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { id: true, email: true, password: true },
+    });
+
+    if (!user?.password) {
+      await CryptoUtils.fakeCompare(password);
+      throw new InvalidCredentialsError();
+    }
+
+    const check = await CryptoUtils.verifyPassword(password, user.password);
+    if (!check.valid) throw new InvalidCredentialsError();
+
+    // Kiểm sớm để báo lỗi tử tế. Ràng buộc thật nằm ở partial unique index của
+    // database, áp lúc `confirmEmailChange` ghi vào — giữa hai thời điểm đó
+    // vẫn có khe cho người khác đăng ký trước.
+    const taken = await this.db.user.findFirst({
+      where: { email: normalized, deletedAt: null, NOT: { id: userId } },
+      select: { id: true },
+    });
+    if (taken) throw new DuplicateFieldError("email", normalized);
+
+    const { token } = await this.verification.issue(userId, "EMAIL_CHANGE", normalized);
+
+    await sendEmailChangeVerificationEmail(normalized, token);
+
+    if (user.email) {
+      // Gửi tới địa chỉ CŨ. Không chặn luồng nếu gửi hỏng — nhưng phải ghi log,
+      // vì đây là cảnh báo an ninh chứ không phải thư xã giao.
+      await sendEmailChangeNoticeEmail(user.email, normalized).catch((error: unknown) => {
+        logger.error("Không gửi được thư báo đổi email tới địa chỉ cũ", error, { userId });
+      });
+    }
+  }
+
+  /**
+   * Bước 2: xác nhận bằng link gửi tới địa chỉ MỚI.
+   *
+   * Thu hồi mọi phiên sau khi đổi: email là danh tính khôi phục tài khoản, nên
+   * đổi nó xong mà để phiên cũ còn sống thì kẻ đã chiếm phiên vẫn ở nguyên đó.
+   */
+  async confirmEmailChange(token: string): Promise<PublicUser> {
+    const consumed = await this.verification.consume(token, "EMAIL_CHANGE");
+    if (!consumed?.destination) throw new InvalidVerificationTokenError();
+
+    try {
+      await this.db.user.update({
+        where: { id: consumed.userId },
+        data: {
+          email: consumed.destination,
+          // Địa chỉ này vừa tự chứng minh quyền sở hữu bằng chính link vừa bấm.
+          emailVerifiedAt: new Date(),
+          pendingEmail: null,
+        },
+      });
+    } catch (error) {
+      // Ai đó đã đăng ký địa chỉ này trong lúc chờ — partial unique index chặn.
+      if ((error as { code?: string }).code === "P2002") {
+        throw new DuplicateFieldError("email", consumed.destination);
+      }
+      throw error;
+    }
+
+    await this.tokens.revokeAllForUser(consumed.userId);
+
+    const user = await this.users.findById(consumed.userId);
+    if (!user) throw new InvalidVerificationTokenError();
+
+    logger.info("Đã đổi địa chỉ email", { userId: consumed.userId });
+    return user;
+  }
+
+  // -------------------------------------------------------------------------
+  // Xác thực số điện thoại (SMS)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Gửi mã OTP tới số điện thoại mà người dùng muốn gắn vào tài khoản.
+   *
+   * ---
+   * BA LỚP CHẶN LẠM DỤNG, VÀ VÌ SAO CẦN ĐỦ CẢ BA
+   *
+   * Đây là endpoint DUY NHẤT trong bộ khung có chi phí trực tiếp trên mỗi lần
+   * gọi. Một lỗ hổng ở đây không dẫn tới mất dữ liệu — nó dẫn tới một hoá đơn.
+   *
+   *   1. Rate limit theo IP — do `@RateLimit("phoneOtp")` ở tầng HTTP lo.
+   *      Chặn một máy bắn liên tục. KHÔNG chặn được kẻ xoay vòng IP.
+   *   2. **Giãn cách theo SỐ ĐIỆN THOẠI** (mặc định 60 giây). Chặn "SMS
+   *      bombing": nhiều IP cùng dội mã vào một nạn nhân để quấy rối.
+   *   3. **Trần theo NGÀY trên số điện thoại** (mặc định 5). Chặn kẻ kiên nhẫn
+   *      gửi đều tay suốt 24 giờ.
+   *
+   * Lớp 2 và 3 khoá theo SỐ, không theo người dùng — vì kẻ tấn công tạo được
+   * nhiều tài khoản, nhưng số điện thoại nạn nhân thì chỉ có một.
+   */
+  async requestPhoneVerification(userId: string, phone: string): Promise<void> {
+    if (!isPhoneVerificationEnabled()) throw new PhoneVerificationDisabledError();
+
+    const normalized = normalizePhone(phone);
+
+    // Kiểm TRƯỚC khi gửi: báo lỗi tử tế, và quan trọng hơn — không tiêu một tin
+    // nhắn cho một số mà cuối cùng vẫn không gắn được.
+    const taken = await this.db.user.findFirst({
+      where: { phone: normalized, deletedAt: null, NOT: { id: userId } },
+      select: { id: true },
+    });
+    if (taken) throw new DuplicateFieldError("phone", normalized);
+
+    const cooldown = await rateLimit(`otp:cooldown:${normalized}`, {
+      limit: 1,
+      windowSeconds: env.PHONE_OTP_RESEND_COOLDOWN_SECONDS,
+    });
+    if (!cooldown.success) throw new PhoneOtpThrottledError(cooldown.retryAfterSeconds);
+
+    const daily = await rateLimit(`otp:daily:${normalized}`, {
+      limit: env.PHONE_OTP_MAX_PER_DAY,
+      windowSeconds: 24 * 60 * 60,
+    });
+    if (!daily.success) throw new PhoneOtpThrottledError(daily.retryAfterSeconds);
+
+    // `destination` giữ số điện thoại đang chờ — đúng khuôn `EMAIL_CHANGE`.
+    // Số chỉ được ghi vào `user.phone` sau khi mã được xác nhận.
+    const { token } = await this.verification.issue(userId, "PHONE_OTP", normalized);
+
+    await sendPhoneOtpSms(normalized, token);
+  }
+
+  /**
+   * Xác nhận mã OTP và gắn số điện thoại vào tài khoản.
+   *
+   * Số điện thoại lấy từ `destination` của chính bản ghi token, KHÔNG nhận lại
+   * từ client — nếu nhận, người dùng gửi mã của số A kèm số B là gắn được số
+   * chưa hề xác thực.
+   */
+  async confirmPhoneVerification(userId: string, code: string): Promise<PublicUser> {
+    if (!isPhoneVerificationEnabled()) throw new PhoneVerificationDisabledError();
+
+    const pending = await this.db.verificationToken.findFirst({
+      where: { userId, type: "PHONE_OTP", usedAt: null },
+      orderBy: { createdAt: "desc" },
+      select: { destination: true },
+    });
+
+    if (!pending?.destination) throw new InvalidVerificationTokenError();
+
+    // `consumeOtp` băm kèm `userId` và tự đếm số lần nhập sai — xem
+    // `VerificationService`.
+    if (!(await this.verification.consumeOtp(userId, "PHONE_OTP", code))) {
+      throw new InvalidVerificationTokenError();
+    }
+
+    try {
+      await this.db.user.update({
+        where: { id: userId },
+        data: { phone: pending.destination, phoneVerifiedAt: new Date() },
+      });
+    } catch (error) {
+      // Ai đó vừa đăng ký số này trong lúc chờ — partial unique index chặn.
+      if ((error as { code?: string }).code === "P2002") {
+        throw new DuplicateFieldError("phone", pending.destination);
+      }
+      throw error;
+    }
+
+    const user = await this.users.findById(userId);
+    if (!user) throw new InvalidVerificationTokenError();
+
+    logger.info("Đã xác thực số điện thoại", { userId });
+    return user;
   }
 
   /**
    * Đổi mật khẩu khi đang đăng nhập.
    *
-   * Bắt nhập lại mật khẩu hiện tại dù người dùng đã đăng nhập: nếu không, ai
-   * ngồi vào máy đang mở sẵn phiên là chiếm được tài khoản vĩnh viễn.
+   * Bắt nhập lại mật khẩu hiện tại DÙ đã đăng nhập: nếu không, ai ngồi vào máy
+   * đang mở sẵn phiên là chiếm được tài khoản vĩnh viễn.
+   *
+   * @param keepFamilyId Phiên được giữ lại — chính là phiên đang thực hiện
+   * thao tác này. Không có tham số này thì người dùng bị đăng xuất khỏi chính
+   * thiết bị họ vừa thao tác, một trải nghiệm trông y như lỗi.
    */
   async changePassword(
     userId: string,
     currentPassword: string,
     newPassword: string,
+    keepFamilyId?: string,
   ): Promise<void> {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, password: true },
+    const user = await this.db.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { id: true, email: true, password: true },
     });
 
     if (!user?.password) {
@@ -274,49 +580,36 @@ export class AuthService {
 
     const password = await CryptoUtils.hashPassword(newPassword);
 
-    await prisma.user.update({ where: { id: userId }, data: { password } });
-    await tokenService.revokeAllForUser(userId);
+    await this.db.user.update({
+      where: { id: userId },
+      data: { password, passwordChangedAt: new Date() },
+    });
+    await this.tokens.revokeAllForUser(userId, { exceptFamilyId: keepFamilyId });
+    await this.securityStamp.invalidate(userId);
+
+    if (user.email) {
+      await sendPasswordChangedEmail(user.email).catch((error: unknown) => {
+        logger.error("Không gửi được email thông báo đổi mật khẩu", error, { userId });
+      });
+    }
 
     logger.info("Mật khẩu được đổi", { userId });
   }
 }
 
 /**
- * Dùng chung cho MỌI lý do token không dùng được: không tồn tại, sai loại, đã
- * dùng, hết hạn.
+ * Chuẩn hoá số điện thoại về một dạng duy nhất trước khi lưu hoặc tra cứu.
  *
- * Gộp lại có chủ đích. Phân biệt "token đã được dùng" với "token không tồn tại"
- * là xác nhận cho người hỏi biết token đó từng hợp lệ.
+ * `0912345678` và `+84912345678` là CÙNG một số, nhưng với database thì là hai
+ * chuỗi khác nhau. Không chuẩn hoá thì cùng một người đăng ký được hai lần, và
+ * trần OTP theo ngày bị lách chỉ bằng cách đổi cách viết.
+ *
+ * Quy về dạng `0…` vì đó là dạng người Việt gõ và là dạng nhà cung cấp SMS
+ * trong nước nhận.
  */
-export class InvalidVerificationTokenError extends Error {
-  constructor() {
-    super("Liên kết không hợp lệ hoặc đã hết hạn");
-    this.name = "InvalidVerificationTokenError";
-  }
-}
-
-export class InvalidCredentialsError extends Error {
-  constructor() {
-    super("Email hoặc mật khẩu không chính xác");
-    this.name = "InvalidCredentialsError";
-  }
-}
-
-/** Khoá thủ công bởi admin (`UserStatus.BANNED`) — không tự hết hạn. */
-export class AccountBannedError extends Error {
-  constructor() {
-    super("Tài khoản đã bị khoá. Vui lòng liên hệ quản trị viên.");
-    this.name = "AccountBannedError";
-  }
-}
-
-/** Khoá tạm tự động do sai mật khẩu liên tiếp — tự hết hạn tại `lockedUntil`. */
-export class AccountLockedError extends Error {
-  constructor(readonly lockedUntil: Date) {
-    const minutes = Math.max(1, Math.ceil((lockedUntil.getTime() - Date.now()) / 60_000));
-    super(`Tài khoản tạm khoá do đăng nhập sai quá nhiều lần. Thử lại sau ${minutes} phút.`);
-    this.name = "AccountLockedError";
-  }
+function normalizePhone(phone: string): string {
+  const digits = phone.trim().replace(/[\s.-]/g, "");
+  return digits.startsWith("+84") ? `0${digits.slice(3)}` : digits;
 }
 
 export const authService = new AuthService();

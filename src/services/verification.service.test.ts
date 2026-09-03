@@ -1,173 +1,191 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { PrismaClient } from "@prisma/client";
 import { VerificationService } from "./verification.service";
+import { hashScopedToken } from "@/lib/opaque-token";
+import { TooManyVerificationAttemptsError } from "@/lib/errors";
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+function createDb(record: unknown, claimedCount = 1) {
+  return {
     $transaction: vi.fn().mockResolvedValue([]),
     verificationToken: {
-      findUnique: vi.fn(),
-      updateMany: vi.fn(),
-      deleteMany: vi.fn(),
+      findUnique: vi.fn().mockResolvedValue(record),
+      updateMany: vi.fn().mockResolvedValue({ count: claimedCount }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       create: vi.fn(),
     },
-  },
-}));
-
-import { prisma } from "@/lib/prisma";
-import { hashOpaqueToken } from "@/lib/opaque-token";
-
-const HOUR = 60 * 60 * 1000;
-
-/** Bản ghi token hợp lệ, dùng làm nền cho các ca kiểm thử. */
-function record(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
-    id: "vt-1",
-    tokenHash: "hash",
-    type: "PASSWORD_RESET" as const,
-    userId: "u-1",
-    expiresAt: new Date(Date.now() + HOUR),
-    usedAt: null,
-    createdAt: new Date(),
-    ...overrides,
-  };
+  } as unknown as PrismaClient;
 }
 
-describe("VerificationService.issue", () => {
-  let service: VerificationService;
+const valid = (extra: Record<string, unknown> = {}) => ({
+  id: "vt-1",
+  userId: "u1",
+  type: "PASSWORD_RESET",
+  destination: null,
+  attempts: 0,
+  usedAt: null,
+  expiresAt: new Date(Date.now() + 60_000),
+  ...extra,
+});
 
-  beforeEach(() => {
-    service = new VerificationService();
-    vi.clearAllMocks();
-  });
+describe("VerificationService", () => {
+  it("cấp token mới thì XOÁ token cũ cùng loại, trong một transaction", async () => {
+    // Bấm "gửi lại" ba lần thì chỉ link cuối cùng còn hiệu lực.
+    const db = createDb(null);
 
-  it("trả về token gốc và hạn dùng", async () => {
-    const issued = await service.issue("u-1", "PASSWORD_RESET");
+    await new VerificationService(db).issue("u1", "PASSWORD_RESET");
 
-    expect(issued.token).toBeTruthy();
-    expect(issued.expiresAt.getTime()).toBeGreaterThan(Date.now());
-  });
-
-  it("KHÔNG lưu token gốc — chỉ lưu bản băm", async () => {
-    const issued = await service.issue("u-1", "PASSWORD_RESET");
-
-    // Rò database mà lấy được token gốc thì mọi lớp bảo vệ khác đều vô nghĩa.
-    expect(prisma.verificationToken.create).toHaveBeenCalledWith({
-      data: {
-        tokenHash: hashOpaqueToken(issued.token),
-        type: "PASSWORD_RESET",
-        userId: "u-1",
-        expiresAt: issued.expiresAt,
-      },
+    expect(db.$transaction).toHaveBeenCalledOnce();
+    expect(db.verificationToken.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "u1", type: "PASSWORD_RESET", usedAt: null },
     });
-    expect(hashOpaqueToken(issued.token)).not.toBe(issued.token);
   });
 
-  it("xoá token cũ chưa dùng cùng loại, trong cùng một transaction", async () => {
-    await service.issue("u-1", "PASSWORD_RESET");
+  it("OTP điện thoại là 6 chữ số, token qua email thì dài và ngẫu nhiên", async () => {
+    const service = new VerificationService(createDb(null));
 
-    expect(prisma.verificationToken.deleteMany).toHaveBeenCalledWith({
-      where: { userId: "u-1", type: "PASSWORD_RESET", usedAt: null },
+    const otp = await service.issue("u1", "PHONE_OTP");
+    const link = await service.issue("u1", "PASSWORD_RESET");
+
+    expect(otp.token).toMatch(/^\d{6}$/);
+    expect(link.token.length).toBeGreaterThan(30);
+  });
+
+  it("đổi token hợp lệ lấy userId và đích đến", async () => {
+    const service = new VerificationService(createDb(valid({ destination: "moi@example.com" })));
+
+    await expect(service.consume("token", "PASSWORD_RESET")).resolves.toEqual({
+      userId: "u1",
+      destination: "moi@example.com",
     });
-    // Cùng transaction: không có khoảnh khắc nào token cũ đã mất mà token mới
-    // chưa kịp ghi.
-    expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 
-  it("hai lần cấp cho ra hai token khác nhau", async () => {
-    const a = await service.issue("u-1", "PASSWORD_RESET");
-    const b = await service.issue("u-1", "PASSWORD_RESET");
+  it("từ chối gọi consume() cho OTP — sai hàm là sai cả cách băm", async () => {
+    // Chốt chặn lập trình: `consume()` tra bằng hash TRẦN, mà OTP thì băm kèm
+    // userId. Gọi nhầm sẽ không tìm thấy gì (hoặc tệ hơn, tìm thấy của người
+    // khác nếu ai đó lỡ băm trần) — nên phải hỏng NGAY và ồn ào.
+    const service = new VerificationService(createDb(valid({ type: "PHONE_OTP" })));
 
-    expect(a.token).not.toBe(b.token);
+    await expect(service.consume("123456", "PHONE_OTP")).rejects.toThrow("consumeOtp");
   });
 
-  it("token xác thực email có hạn dài hơn token đặt lại mật khẩu", async () => {
-    const reset = await service.issue("u-1", "PASSWORD_RESET");
-    const verify = await service.issue("u-1", "EMAIL_VERIFICATION");
+  it("từ chối token SAI LOẠI", async () => {
+    // Không có chốt này thì một link xác thực email dùng được để đặt lại mật khẩu.
+    const service = new VerificationService(createDb(valid({ type: "EMAIL_VERIFICATION" })));
 
-    expect(verify.expiresAt.getTime()).toBeGreaterThan(reset.expiresAt.getTime());
+    await expect(service.consume("token", "PASSWORD_RESET")).resolves.toBeNull();
+  });
+
+  it("từ chối token đã dùng và token hết hạn", async () => {
+    const used = new VerificationService(createDb(valid({ usedAt: new Date() })));
+    const expired = new VerificationService(
+      createDb(valid({ expiresAt: new Date(Date.now() - 1) })),
+    );
+
+    await expect(used.consume("t", "PASSWORD_RESET")).resolves.toBeNull();
+    await expect(expired.consume("t", "PASSWORD_RESET")).resolves.toBeNull();
+  });
+
+  it("hai request song song: chỉ một request giành được token", async () => {
+    // `updateMany` với điều kiện `usedAt: null` trả 0 dòng nghĩa là request kia
+    // vừa giành trước. Đọc-rồi-ghi thay vì làm thế này là token dùng được hai lần.
+    const db = createDb(valid(), 0);
+
+    await expect(new VerificationService(db).consume("t", "PASSWORD_RESET")).resolves.toBeNull();
   });
 });
 
-describe("VerificationService.consume", () => {
-  let service: VerificationService;
+describe("VerificationService — OTP", () => {
+  const otpDb = (record: unknown, overrides: Record<string, unknown> = {}) =>
+    ({
+      $transaction: vi.fn().mockResolvedValue([]),
+      verificationToken: {
+        findFirst: vi.fn().mockResolvedValue(record),
+        findUnique: vi.fn().mockResolvedValue(record),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: vi.fn().mockResolvedValue({ attempts: 1 }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        create: vi.fn(),
+        ...overrides,
+      },
+    }) as unknown as PrismaClient;
 
-  beforeEach(() => {
-    service = new VerificationService();
-    vi.clearAllMocks();
-    vi.mocked(prisma.verificationToken.updateMany).mockResolvedValue({ count: 1 });
+  const otpRecord = (code: string, extra: Record<string, unknown> = {}) => ({
+    id: "vt-otp",
+    userId: "u1",
+    type: "PHONE_OTP" as const,
+    destination: "0900000000",
+    attempts: 0,
+    usedAt: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    // Băm KÈM userId — đây là điểm mấu chốt, xem `hashScopedToken`.
+    tokenHash: hashScopedToken("u1:PHONE_OTP", code),
+    ...extra,
   });
 
-  it("trả về userId và đánh dấu token đã dùng", async () => {
-    // Đồng hồ giả để `new Date()` trong service ra giá trị xác định — nhờ vậy
-    // khẳng định được chính xác thay vì chỉ kiểm tra "là một Date nào đó".
-    const now = new Date("2026-08-14T10:00:00.000Z");
-    vi.useFakeTimers();
-    vi.setSystemTime(now);
+  it("chấp nhận OTP đúng của ĐÚNG người dùng", async () => {
+    const db = otpDb(otpRecord("123456"));
 
-    try {
-      vi.mocked(prisma.verificationToken.findUnique).mockResolvedValue(
-        record({ expiresAt: new Date(now.getTime() + HOUR) }),
-      );
-
-      const userId = await service.consume("token-bat-ky", "PASSWORD_RESET");
-
-      expect(userId).toBe("u-1");
-      expect(prisma.verificationToken.updateMany).toHaveBeenCalledWith({
-        where: { id: "vt-1", usedAt: null },
-        data: { usedAt: now },
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(new VerificationService(db).consumeOtp("u1", "PHONE_OTP", "123456")).resolves.toBe(
+      true,
+    );
   });
 
-  it("tra cứu bằng bản băm chứ không phải token gốc", async () => {
-    vi.mocked(prisma.verificationToken.findUnique).mockResolvedValue(record());
+  it("KHÔNG cho người khác dùng cùng dãy số đó", async () => {
+    /*
+     * Lỗ hổng cốt lõi mà băm-kèm-userId bịt lại.
+     *
+     * Với hash trần, `SHA-256("123456")` là một hằng số: A nhập đúng mã của
+     * mình mà hệ thống tra ra bản ghi của B, rồi trả về `userId` của B. Ở đây
+     * bản ghi thuộc `u1`, nên `u2` nhập đúng dãy số đó vẫn phải trượt.
+     */
+    const db = otpDb(otpRecord("123456"));
 
-    await service.consume("token-bat-ky", "PASSWORD_RESET");
+    await expect(new VerificationService(db).consumeOtp("u2", "PHONE_OTP", "123456")).resolves.toBe(
+      false,
+    );
+  });
 
-    expect(prisma.verificationToken.findUnique).toHaveBeenCalledWith({
-      where: { tokenHash: hashOpaqueToken("token-bat-ky") },
+  it("mã sai làm TĂNG bộ đếm lần thử", async () => {
+    const db = otpDb(otpRecord("123456"));
+
+    await new VerificationService(db).consumeOtp("u1", "PHONE_OTP", "000000");
+
+    expect(db.verificationToken.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { attempts: { increment: 1 } } }),
+    );
+  });
+
+  it("chạm ngưỡng thì HUỶ mã, không chỉ từ chối lần đó", async () => {
+    // Chỉ từ chối mà để mã sống tiếp là kẻ tấn công đợi bộ đếm khác reset rồi
+    // dò tiếp — 10^6 khả năng không phải là nhiều với một mã sống 5 phút.
+    const db = otpDb(otpRecord("123456", { attempts: 5 }));
+
+    await expect(
+      new VerificationService(db).consumeOtp("u1", "PHONE_OTP", "000000"),
+    ).rejects.toBeInstanceOf(TooManyVerificationAttemptsError);
+
+    expect(db.verificationToken.updateMany).toHaveBeenCalledWith({
+      where: { id: "vt-otp", usedAt: null },
+      data: { usedAt: expect.any(Date) },
     });
   });
 
-  it("từ chối token không tồn tại", async () => {
-    vi.mocked(prisma.verificationToken.findUnique).mockResolvedValue(null);
+  it("OTP hết hạn thì trượt", async () => {
+    const db = otpDb(otpRecord("123456", { expiresAt: new Date(Date.now() - 1) }));
 
-    expect(await service.consume("khong-co", "PASSWORD_RESET")).toBeNull();
-  });
-
-  it("từ chối token sai loại", async () => {
-    // Token đặt lại mật khẩu không được dùng để xác thực email và ngược lại —
-    // nếu không, một link vô hại lại đổi được mật khẩu.
-    vi.mocked(prisma.verificationToken.findUnique).mockResolvedValue(record());
-
-    expect(await service.consume("token", "EMAIL_VERIFICATION")).toBeNull();
-    expect(prisma.verificationToken.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("từ chối token đã dùng", async () => {
-    vi.mocked(prisma.verificationToken.findUnique).mockResolvedValue(
-      record({ usedAt: new Date() }),
+    await expect(new VerificationService(db).consumeOtp("u1", "PHONE_OTP", "123456")).resolves.toBe(
+      false,
     );
-
-    expect(await service.consume("token", "PASSWORD_RESET")).toBeNull();
   });
 
-  it("từ chối token hết hạn", async () => {
-    vi.mocked(prisma.verificationToken.findUnique).mockResolvedValue(
-      record({ expiresAt: new Date(Date.now() - HOUR) }),
-    );
+  it("lưu `destination` để biết mã đã gửi tới đâu", async () => {
+    const db = otpDb(null);
 
-    expect(await service.consume("token", "PASSWORD_RESET")).toBeNull();
-  });
+    await new VerificationService(db).issue("u1", "EMAIL_CHANGE", "moi@example.com");
 
-  it("từ chối khi một request khác vừa giành được token trước", async () => {
-    // Hai request song song cùng một token: cả hai đều đọc thấy usedAt null,
-    // nhưng chỉ một cái ghi được. Cái thua phải thất bại, không được đi tiếp.
-    vi.mocked(prisma.verificationToken.findUnique).mockResolvedValue(record());
-    vi.mocked(prisma.verificationToken.updateMany).mockResolvedValue({ count: 0 });
-
-    expect(await service.consume("token", "PASSWORD_RESET")).toBeNull();
+    const created = vi.mocked(db.verificationToken.create).mock.calls[0]![0]!.data as {
+      destination: string;
+    };
+    expect(created.destination).toBe("moi@example.com");
   });
 });

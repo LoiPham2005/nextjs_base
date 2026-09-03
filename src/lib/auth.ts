@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { prisma } from "./prisma";
+import { userService } from "@/services/user.service";
 import type { Permission } from "./permissions";
 import { permissionService } from "@/services/permission.service";
 import {
@@ -13,17 +13,6 @@ import {
   verifySession,
   type SessionPayload,
 } from "./session";
-
-const PUBLIC_USER_FIELDS = {
-  id: true,
-  email: true,
-  username: true,
-  fullName: true,
-  emailVerifiedAt: true,
-  createdAt: true,
-  updatedAt: true,
-  role: { select: { key: true, name: true } },
-} as const;
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;
 
@@ -39,25 +28,18 @@ export const getSession = cache(async (): Promise<SessionPayload | null> => {
 /**
  * Lấy user từ database theo session.
  *
- * Vì sao không dùng thẳng dữ liệu trong token: token sống 7 ngày. Trong 7 ngày
- * đó user có thể bị xoá hoặc bị hạ quyền, mà token cũ vẫn hợp lệ về chữ ký.
- * Mọi quyết định phân quyền phải dựa trên `role` đọc từ database.
+ * Vì sao không dùng thẳng dữ liệu trong token: token sống nhiều ngày. Trong
+ * khoảng đó user có thể bị xoá hoặc bị hạ quyền, mà token cũ vẫn hợp lệ về chữ
+ * ký. Mọi quyết định phân quyền phải dựa trên dữ liệu đọc từ database.
  */
 export const getCurrentUser = cache(async () => {
   const session = await getSession();
   if (!session) return null;
 
-  const row = await prisma.user.findUnique({
-    where: { id: session.sub, deletedAt: null },
-    select: PUBLIC_USER_FIELDS,
-  });
-
-  if (!row) return null;
-
-  // Làm phẳng `role` thành khoá dạng chuỗi, giống `userService.toPublicUser`.
-  // Nhờ vậy giao diện vẫn viết `user.role === "ADMIN"` như khi còn dùng enum.
-  const { role, ...rest } = row;
-  return { ...rest, role: role.key, roleName: role.name };
+  // Đi qua `userService` thay vì tự viết `select`: cột `password` và
+  // `twoFactorSecret` không bao giờ được đọc lên ở đây, và luật đó chỉ tồn tại
+  // ở đúng một chỗ (`USER_SELECT`).
+  return userService.findById(session.sub);
 });
 
 /** Dùng trong page/layout. Chưa đăng nhập thì đá về /login. */
@@ -82,7 +64,7 @@ export async function requireUser(returnTo?: string): Promise<CurrentUser> {
  */
 export async function requireAdmin(returnTo?: string): Promise<CurrentUser> {
   const user = await requireUser(returnTo);
-  if (user.role !== "ADMIN") notFound();
+  if (!user.roles.includes("ADMIN")) notFound();
   return user;
 }
 
@@ -100,7 +82,7 @@ export async function requirePermission(
   returnTo?: string,
 ): Promise<CurrentUser> {
   const user = await requireUser(returnTo);
-  if (!(await permissionService.can(user.role, permission))) notFound();
+  if (!(await permissionService.can(user.id, permission))) notFound();
   return user;
 }
 

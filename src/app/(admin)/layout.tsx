@@ -31,8 +31,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const user = await requireUser("/users");
 
   const [canSeeUsers, canSeeRoles] = await Promise.all([
-    permissionService.can(user.role, "user:read"),
-    permissionService.can(user.role, "role:read"),
+    permissionService.can(user.roles.join(", "), "user:read"),
+    permissionService.can(user.roles.join(", "), "role:read"),
   ]);
 
   if (!canSeeUsers && !canSeeRoles) {
