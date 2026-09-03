@@ -7,7 +7,7 @@ import { expect, test } from "@playwright/test";
  * đòi `identifier`" — lỗi làm đăng nhập web hỏng hoàn toàn mà cả typecheck,
  * unit test lẫn build đều báo xanh.
  *
- * Điều kiện chạy: database đã `pnpm db:seed:dev`. Tài khoản dùng ở đây là
+ * Điều kiện chạy: database đã `pnpm db:seed`. Tài khoản dùng ở đây là
  * tài khoản mẫu của bộ seed đó.
  */
 

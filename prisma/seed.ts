@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { seedRbac } from "./seeds/seed-rbac";
 import { seedAdmin } from "./seeds/seed-admin";
@@ -21,7 +22,21 @@ import { seedDev } from "./seeds/seed-dev";
  *   seedAdmin — tài khoản quản trị đầu tiên, đọc từ ADMIN_EMAIL/ADMIN_PASSWORD.
  *   seedDev   — dữ liệu mẫu có mật khẩu công khai. CHỈ dev.
  */
-const prisma = new PrismaClient();
+/*
+ * Prisma 7 bỏ query engine Rust: `new PrismaClient()` KHÔNG có adapter sẽ ném
+ * lỗi ngay khi khởi tạo, chứ không phải lúc truy vấn đầu tiên.
+ *
+ * Không dùng lại `src/lib/prisma.ts` được: file đó có `import "server-only"`,
+ * thứ cố tình nổ khi chạy ngoài React Server Component — mà seed là script
+ * Node thuần.
+ */
+const connectionString = process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error("Thiếu DATABASE_URL — seed không biết nối tới database nào.");
+}
+
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
 async function main() {
   const isProduction = process.env.NODE_ENV === "production";

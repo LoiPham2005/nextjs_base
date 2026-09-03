@@ -62,9 +62,20 @@ export async function POST(request: Request) {
       tokenType: "Bearer" as const,
       refreshToken: rotated.refresh.token,
       refreshExpiresAt: rotated.refresh.expiresAt.toISOString(),
-      // Refresh token xoay vòng nên id phiên cũng đổi. Client phải ghi đè giá
-      // trị cũ, nếu không màn "thiết bị đang đăng nhập" sẽ đánh dấu nhầm.
-      sessionId: rotated.refresh.id,
+      /*
+       * `familyId`, KHÔNG phải `id` của bản ghi token.
+       *
+       * `id` đổi sau MỖI lần refresh vì token xoay vòng, còn `familyId` thì
+       * không — và `GET /auth/sessions` liệt kê theo `familyId`. Trả `id` ở
+       * đây thì sau lần refresh đầu tiên, giá trị client đang giữ không còn
+       * khớp dòng nào trong danh sách: màn "thiết bị đang đăng nhập" không bao
+       * giờ đánh dấu được thiết bị hiện tại, và `DELETE /auth/sessions/{id}`
+       * với giá trị đó trả 404.
+       *
+       * Phải khớp với `issueTokenPair` — login và refresh mà trả hai loại giá
+       * trị khác nhau cho cùng một trường là bẫy cho mọi client.
+       */
+      sessionId: rotated.refresh.familyId,
     });
   } catch (error) {
     return handleApiError(error, { route: "POST /api/v1/auth/refresh", request });

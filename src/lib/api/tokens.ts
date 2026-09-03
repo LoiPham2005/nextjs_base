@@ -18,8 +18,9 @@ export type TokenPair = {
    * `GET /auth/sessions`: access token không mang thông tin gì về refresh
    * token đã sinh ra nó, nên thiếu id thì màn hình đó không tự nhận ra mình.
    *
-   * ⚠️ Đổi sau mỗi lần refresh, vì refresh token xoay vòng. Client phải cập
-   * nhật lại giá trị này mỗi lần gọi `/auth/refresh`.
+   * ⚠️ Đây là `familyId`, nên nó KHÔNG đổi qua các lần refresh — client lưu
+   * một lần rồi dùng mãi cho tới khi đăng xuất. `id` của bản ghi token thì có
+   * đổi, nhưng giá trị đó không bao giờ ra khỏi server.
    */
   sessionId: string;
 };

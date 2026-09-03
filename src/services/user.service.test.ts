@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { UserService } from "./user.service";
+import type { PermissionService } from "./permission.service";
 import {
   AccountBannedError,
   AccountInactiveError,
@@ -56,6 +57,11 @@ function createDb(
       }),
     },
     userProfile: { upsert: vi.fn() },
+    userPermission: { upsert: vi.fn(), deleteMany: vi.fn() },
+    permission: { findUnique: vi.fn().mockResolvedValue({ id: "p1" }) },
+    // `softDelete` gọi `$transaction([...])` với một MẢNG, nên các lệnh trong
+    // đó chạy trên client gốc chứ không trên `tx`.
+    refreshToken: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     // Chạy callback ngay tại chỗ thay vì mở transaction thật: test này kiểm
     // logic nghiệp vụ, không kiểm Postgres.
     $transaction: vi.fn((arg: unknown) =>
@@ -73,6 +79,16 @@ function createTx() {
     // `setStatus` thu hồi phiên ngay trong cùng transaction khi khoá tài khoản
     // — khoá mà để phiên cũ sống tiếp thì việc khoá gần như vô nghĩa.
     refreshToken: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  };
+}
+
+/** `PermissionService` giả — chỉ cần đếm xem cache có bị xoá hay không. */
+function createPermissions() {
+  return {
+    invalidateUser: vi.fn().mockResolvedValue(undefined),
+    invalidateAll: vi.fn().mockResolvedValue(undefined),
+  } as unknown as PermissionService & {
+    invalidateUser: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -300,5 +316,65 @@ describe("assertLoginAllowed", () => {
     expect(() => assertLoginAllowed("ACTIVE")).not.toThrow();
     expect(() => assertLoginAllowed("BANNED")).toThrow(AccountBannedError);
     expect(() => assertLoginAllowed("INACTIVE")).toThrow(AccountInactiveError);
+  });
+});
+
+/**
+ * Quyền được cache 60 giây, nên MỌI đường ghi đụng tới thẩm quyền phải xoá
+ * cache của người bị ảnh hưởng.
+ *
+ * Chiều "cấp thêm" mà quên chỉ gây khó hiểu: admin tick một quyền, thử ngay,
+ * thấy vẫn 403. Chiều "tước bỏ" thì là lỗ hổng thật — người vừa bị gỡ vai trò
+ * vẫn thao tác được như cũ thêm một phút nữa.
+ *
+ * Đây là lỗi ĐÃ XẢY RA: `setUserPermission` ghi đúng vào database nhưng không
+ * xoá cache, nên cấp quyền xong gọi lại API vẫn nhận 403.
+ */
+describe("xoá cache quyền sau mỗi lần ghi thẩm quyền", () => {
+  it("create: người mới có vai trò ngay từ request đầu tiên", async () => {
+    const permissions = createPermissions();
+
+    await new UserService(createDb(), permissions).create(baseInput);
+
+    expect(permissions.invalidateUser).toHaveBeenCalledWith("u1");
+  });
+
+  it("update: đổi vai trò có hiệu lực NGAY, không đợi cache hết hạn", async () => {
+    const permissions = createPermissions();
+    const db = createDb({
+      user: { findFirst: vi.fn().mockResolvedValue(USER_ROW) },
+      role: { findMany: vi.fn().mockResolvedValue([{ id: "r-admin", key: "ADMIN", level: 50 }]) },
+    });
+
+    await new UserService(db, permissions).update("u1", { roleKeys: ["ADMIN"] });
+
+    expect(permissions.invalidateUser).toHaveBeenCalledWith("u1");
+  });
+
+  it("setUserPermission: cấp quyền lẻ có hiệu lực ngay", async () => {
+    const permissions = createPermissions();
+
+    await new UserService(createDb(), permissions).setUserPermission("u1", "user:read", true);
+
+    expect(permissions.invalidateUser).toHaveBeenCalledWith("u1");
+  });
+
+  it("clearUserPermission: gỡ ngoại lệ có hiệu lực ngay", async () => {
+    const permissions = createPermissions();
+
+    await new UserService(createDb(), permissions).clearUserPermission("u1", "user:read");
+
+    expect(permissions.invalidateUser).toHaveBeenCalledWith("u1");
+  });
+
+  it("softDelete: tài khoản đã xoá không còn quyền nào trong cache", async () => {
+    const permissions = createPermissions();
+    const db = createDb({
+      user: { findFirst: vi.fn().mockResolvedValue({ id: "u1", email: "a@b.com" }) },
+    });
+
+    await new UserService(db, permissions).softDelete("u1");
+
+    expect(permissions.invalidateUser).toHaveBeenCalledWith("u1");
   });
 });

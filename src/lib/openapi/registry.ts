@@ -243,8 +243,9 @@ const tokenPairSchema = named(
     refreshToken: z.string(),
     refreshExpiresAt: z.iso.datetime(),
     /**
-     * Id phiên vừa cấp. Không phải bí mật. Client lưu lại để đánh dấu "thiết
-     * bị này" trên `GET /auth/sessions`. ĐỔI sau mỗi lần refresh.
+     * Id phiên vừa cấp (`familyId`). Không phải bí mật. Client lưu lại để đánh
+     * dấu "thiết bị này" trên `GET /auth/sessions`. KHÔNG đổi qua các lần
+     * refresh, nên lưu một lần là đủ.
      */
     sessionId: z.string(),
   }),

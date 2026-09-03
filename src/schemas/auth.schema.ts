@@ -88,6 +88,7 @@ export const tokenPairSchema = z.object({
    * khi lưu) — client giữ lại để đánh dấu "thiết bị này" trên màn quản lý
    * phiên. Đổi sau MỖI lần refresh vì refresh token xoay vòng.
    */
+  /** `familyId` — ổn định qua mọi lần refresh, khớp với `GET /auth/sessions`. */
   sessionId: z.string(),
 });
 export type TokenPair = z.infer<typeof tokenPairSchema>;

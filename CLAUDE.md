@@ -31,14 +31,14 @@ pnpm test -- -t "khoá tài khoản khi sai mật khẩu chạm ngưỡng"
 pnpm db:generate                # sinh lại Prisma Client sau khi sửa schema.prisma
 pnpm db:migrate                 # tạo + áp migration mới (dev)
 pnpm db:studio                  # GUI xem/sửa data — http://localhost:5555
-pnpm db:seed:dev                # dữ liệu mẫu (roles, user demo)
+pnpm db:seed                # dữ liệu mẫu (roles, user demo)
 pnpm db:purge                   # dọn token hết hạn + nhật ký cũ (qua tsconfig.scripts.json)
 
 pnpm realtime:dev               # WebSocket, tiến trình riêng (cổng 3002)
 pnpm worker:dev                 # job nền, tiến trình riêng — cần REDIS_URL
 ```
 
-⚠️ `pnpm test:e2e` cần database đã seed (`pnpm db:seed:dev`) — bộ test đăng nhập bằng tài
+⚠️ `pnpm test:e2e` cần database đã seed (`pnpm db:seed`) — bộ test đăng nhập bằng tài
 khoản mẫu. Nó tự `pnpm build && pnpm start` trên cổng 3100, cố ý chạy bản production chứ không
 phải `next dev`: CSP và React Refresh khác nhau giữa hai môi trường, mà đó đúng là chỗ dễ hỏng.
 
@@ -203,8 +203,9 @@ Vài điểm dễ sai:
 - **`GET`/`DELETE /api/v1/auth/sessions[/id]`** — màn "thiết bị đang đăng nhập". Ràng buộc quyền
   sở hữu nằm TRONG câu truy vấn (`where: { id, userId }`), không phải một phép kiểm tra riêng —
   `id` đến từ URL nên người gọi tự đặt được. Trả 404 cho cả "không tồn tại" lẫn "của người khác".
-  `TokenPair` giờ có thêm `sessionId` để client tự nhận ra phiên của mình; nó **đổi sau mỗi lần
-  refresh** vì refresh token xoay vòng.
+  `TokenPair` có `sessionId` để client tự nhận ra phiên của mình. Đó là **`familyId`**, không phải
+  id bản ghi token, nên nó **ổn định qua mọi lần refresh** — lưu một lần là đủ, và nó khớp với `id`
+  mà `GET /auth/sessions` trả về.
 - **`/users` phân trang theo SỐ TRANG** (`page`/`limit`), không phải cursor: màn quản trị cần nhảy
   tới "trang 7" và cần biết TỔNG số bản ghi — cursor không cho cả hai. `userService.list()` trả
   `{ items, meta }` trong MỘT lần gọi, nên không có chuyện đếm và lấy trang nhìn thấy hai trạng

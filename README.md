@@ -19,11 +19,11 @@ openssl rand -base64 48
 
 docker compose up -d postgres      # hoặc trỏ DATABASE_URL tới Postgres sẵn có
 pnpm db:migrate                    # tạo bảng
-pnpm db:seed:dev                   # nạp dữ liệu mẫu
+pnpm db:seed                   # nạp dữ liệu mẫu
 pnpm dev                           # http://localhost:3000
 ```
 
-Tài khoản sau khi `db:seed:dev`:
+Tài khoản sau khi `db:seed`:
 
 | Email                   | Quyền | Mật khẩu         |
 | ----------------------- | ----- | ---------------- |
@@ -343,13 +343,13 @@ pnpm db:migrate       # tạo migration mới (dev)
 pnpm db:deploy        # áp migration đã có (production)
 pnpm db:generate
 pnpm db:studio
-pnpm db:seed:dev      # dữ liệu mẫu
+pnpm db:seed      # dữ liệu mẫu
 pnpm db:seed:prod     # chỉ tài khoản admin nền
 pnpm db:reset         # XOÁ SẠCH rồi tạo lại
 pnpm db:purge         # dọn token đã hết hạn — gắn vào cron trên máy chủ
 ```
 
-⚠️ `pnpm test:e2e` cần database đã chạy `pnpm db:seed:dev`: bộ test đăng nhập
+⚠️ `pnpm test:e2e` cần database đã chạy `pnpm db:seed`: bộ test đăng nhập
 bằng tài khoản mẫu của bộ seed đó.
 
 `make help` liệt kê các lệnh tương đương.

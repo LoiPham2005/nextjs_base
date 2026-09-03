@@ -10,6 +10,7 @@ import {
   type UpdateUserInput,
 } from "@/schemas/user.schema";
 import { CryptoUtils } from "@/lib/crypto";
+import { type PermissionService, permissionService } from "@/services/permission.service";
 import {
   DuplicateFieldError,
   InsufficientRoleLevelError,
@@ -65,7 +66,19 @@ export function toPublicUser(row: UserRow): PublicUser {
 }
 
 export class UserService {
-  constructor(private readonly db: PrismaClient = prisma) {}
+  /**
+   * ⚠️ MỌI đường ghi đụng tới thẩm quyền — gán vai trò, cấp/tước quyền lẻ, xoá
+   * tài khoản — đều PHẢI gọi `permissions.invalidateUser()`.
+   *
+   * Quên một chỗ thì thay đổi chỉ có hiệu lực sau khi cache hết hạn (60 giây).
+   * Chiều "cấp thêm" chỉ gây khó hiểu: admin tick một quyền, thử ngay, thấy
+   * vẫn 403, rồi kết luận hệ thống hỏng. Chiều "tước bỏ" thì là lỗ hổng thật:
+   * người vừa bị gỡ vai trò vẫn thao tác được như cũ thêm một phút nữa.
+   */
+  constructor(
+    private readonly db: PrismaClient = prisma,
+    private readonly permissions: PermissionService = permissionService,
+  ) {}
 
   // -------------------------------------------------------------------------
   // Bậc quyền lực — chốt chặn leo thang đặc quyền
@@ -315,6 +328,8 @@ export class UserService {
         select: USER_SELECT,
       });
 
+      await this.permissions.invalidateUser(row.id);
+
       return toPublicUser(row);
     } catch (error) {
       UserService.catchDuplicate(error);
@@ -384,6 +399,8 @@ export class UserService {
           select: USER_SELECT,
         });
       });
+
+      await this.permissions.invalidateUser(row.id);
 
       return toPublicUser(row);
     } catch (error) {
@@ -559,6 +576,8 @@ export class UserService {
         data: { revokedAt: new Date() },
       }),
     ]);
+
+    await this.permissions.invalidateUser(id);
   }
 
   // -------------------------------------------------------------------------
@@ -599,6 +618,8 @@ export class UserService {
         expiresAt: options.expiresAt ?? null,
       },
     });
+
+    await this.permissions.invalidateUser(userId);
   }
 
   /** Gỡ ngoại lệ, trả người dùng về đúng quyền của vai trò họ đang mang. */
@@ -612,6 +633,8 @@ export class UserService {
     await this.db.userPermission.deleteMany({
       where: { userId, permissionId: permission.id },
     });
+
+    await this.permissions.invalidateUser(userId);
   }
 }
 
