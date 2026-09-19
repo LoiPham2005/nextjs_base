@@ -64,8 +64,11 @@ const envSchema = z.object({
     .string()
     .min(1, "DATABASE_URL là bắt buộc")
     .refine(
-      (value) => value.startsWith("postgresql://") || value.startsWith("postgres://"),
-      "DATABASE_URL phải là chuỗi kết nối PostgreSQL (postgresql://...)",
+      (value) =>
+        value.startsWith("postgresql://") ||
+        value.startsWith("postgres://") ||
+        value.startsWith("prisma+postgres://"),
+      "DATABASE_URL phải là chuỗi kết nối PostgreSQL (postgresql://, postgres://, prisma+postgres://...)",
     ),
 
   /**

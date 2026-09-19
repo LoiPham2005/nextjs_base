@@ -42,7 +42,7 @@ function parseBlocks(source: string): Block[] {
 
   for (const line of source.split("\n")) {
     const open = /^\s*(model|enum)\s+(\w+)\s*\{/.exec(line);
-    if (open) {
+    if (open && open[1] && open[2]) {
       current = { kind: open[1] as Block["kind"], name: open[2], lines: [] };
       continue;
     }
@@ -70,9 +70,10 @@ function columnsOf(block: Block) {
     if (!line || line.startsWith("//") || line.startsWith("@@")) return [];
 
     const field = /^(\w+)\s+(\w+)/.exec(line);
-    if (!field) return [];
+    if (!field || !field[1] || !field[2]) return [];
 
-    const [, name, type] = field;
+    const name = field[1];
+    const type = field[2];
     if (modelNames.has(type)) return [];
     if (!SCALARS.has(type) && !enumNames.has(type)) return [];
 
