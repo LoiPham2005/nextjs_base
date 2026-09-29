@@ -136,45 +136,172 @@ docker service update --force dokploy
 
 ---
 
-## 5. Domain không vào được: kiểm tra theo thứ tự
+## 5. Xử lý lỗi khi deploy
 
-Triệu chứng hay gặp: trình duyệt báo `NET::ERR_CERT_AUTHORITY_INVALID`, chứng chỉ ghi
-`TRAEFIK DEFAULT CERT`, còn `http://` trả 404. Nghĩa là Traefik **không thấy** container nào
-khớp với domain. Kiểm tra lần lượt:
+Mọi lỗi đều bắt đầu giống nhau: mở tab **Deployments**, bấm vào lần deploy hỏng, cuộn tới dòng đỏ
+**đầu tiên**. Các dòng sau thường chỉ là hệ quả. Log đó cũng nằm trên đĩa:
+
+```bash
+APP=nextjsbase-app-v4exof
+L=$(ls -t /etc/dokploy/logs/$APP/*.log | head -1)
+grep -nE -i 'error|failed|❌|killed|no space' "$L" | head -20
+```
+
+Dòng lỗi đó cho biết deploy chết ở giai đoạn nào: **clone → build → chạy container → vào qua
+domain**. Tìm đúng giai đoạn ở các mục dưới.
+
+### 5.1 Chết lúc clone repo
+
+| Dòng lỗi | Cách sửa |
+|---|---|
+| `Repository not found`, `Permission denied (publickey)` | Settings → **Git** → kết nối lại GitHub, và cấp quyền cho repo này trong GitHub App |
+| `Remote branch ... not found` | Tab General: sửa tên branch cho đúng |
+| `Compose file not found` | Tab General: sửa **Compose Path**, ví dụ `./docker-compose.dokploy.yml` |
+
+### 5.2 Chết lúc build
+
+**`exit code: 137`, `Killed`, hoặc build treo rất lâu rồi đứt: hết RAM.**
+
+```bash
+free -h
+dmesg -T | grep -iE 'killed process|out of memory' | tail -5
+```
+
+`dmesg` có dòng `Killed process` thì đúng là hết RAM. Thêm swap 4 GB (chỉ làm một lần):
+
+```bash
+fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+```
+
+Nếu vẫn chết thì nâng RAM VPS, hoặc build trên CI (mục 10 của [HUONG_DAN_DOKPLOY.md](HUONG_DAN_DOKPLOY.md)).
+
+**`no space left on device`: đầy đĩa.**
+
+```bash
+df -h /
+docker system df
+docker builder prune -f      # build cache, thường chiếm nhiều nhất
+docker image prune -a -f     # image không container nào dùng
+```
+
+**Lỗi code (TypeScript, thiếu module, lệnh `pnpm` hỏng).** Không phải lỗi server. Chạy
+`pnpm build` ở máy mình cho ra đúng lỗi đó, sửa xong push lại.
+
+### 5.3 Build xong nhưng chết lúc dựng container
+
+**`Bind for 0.0.0.0:3000 failed: port is already allocated`.** File compose còn `ports:` và cổng
+đó đã có container khác giữ. Xem ai đang giữ:
+
+```bash
+docker ps --format '{{.Names}}  {{.Ports}}' | grep ':3000->'
+ss -ltnp | grep ':3000 '
+```
+
+Sửa trong file compose: đổi `ports:` thành `expose:`. Traefik vào qua mạng nội bộ, không cần
+publish cổng ra host.
+
+**`The container name "/xxx" is already in use`.** File compose có `container_name` và tên đó
+đang thuộc về container khác:
+
+```bash
+docker ps -a --format '{{.Names}}  {{.Status}}  {{.Label "com.docker.compose.project"}}' | grep xxx
+```
+
+Sửa trong file compose: xoá `container_name`. Container cũ còn sót lại thì `docker rm -f xxx`,
+nhớ nhìn cột project trước để khỏi xoá nhầm của app khác.
+
+**`service "migrate" didn't complete successfully: exit 1`.** Migration hỏng nên `web` và
+`worker` không được dựng:
+
+```bash
+docker logs $APP-migrate-1 --tail 50
+```
+
+Hay gặp: `DATABASE_URL` sai, DB chưa chạy, hoặc migration đụng dữ liệu đang có.
+
+### 5.4 Container lên rồi nhưng `unhealthy` hoặc `Restarting`
 
 ```bash
 C=$APP-web-1
-
-# 1. Container có healthy không? Traefik bỏ qua container unhealthy.
 docker ps -a --format '{{.Names}}  {{.Status}}' | grep $APP
-
-# 2. Có label traefik không? Không có là chưa Deploy lại sau khi sửa domain.
-docker inspect $C --format '{{json .Config.Labels}}' | tr ',' '\n' | grep -i traefik
-
-# 3. Có nằm trong mạng dokploy-network không?
-docker inspect $C --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'
-
-# 4. App có lỗi lúc khởi động không? (thiếu hoặc sai biến env hay gặp nhất)
 docker logs $C --tail 50
+docker inspect $C --format '{{json .State.Health}}' | tr ',' '\n' | tail -8
+```
 
-# 5. Let's Encrypt có cấp được chứng chỉ không?
-docker logs dokploy-traefik --tail 200 2>&1 | grep -iE 'acme|<domain>'
+- Log báo `Cấu hình môi trường không hợp lệ`: dòng ngay dưới ghi rõ biến nào sai. Sửa ở tab
+  **Environment** rồi Deploy lại. Ví dụ đã gặp: `ADMIN_PASSWORD` ngắn hơn 8 ký tự.
+- Log không có lỗi mà vẫn `unhealthy`: đọc phần `Output` của lệnh `inspect`. Đó là kết quả
+  healthcheck gọi `/api/health`.
+- `Restarting` liên tục kèm `exit 137`: container vượt giới hạn RAM đặt ở tab Advanced.
+
+Xem container có nhận đúng biến không:
+
+```bash
+docker exec $C env | sort | grep -v -iE 'secret|password|key'
+```
+
+### 5.5 Container healthy nhưng domain không vào được
+
+Triệu chứng: trình duyệt báo `NET::ERR_CERT_AUTHORITY_INVALID`, chứng chỉ ghi
+`TRAEFIK DEFAULT CERT`, `http://` trả 404. Nghĩa là Traefik **không thấy** container nào khớp
+domain.
+
+Kiểm tra từ máy mình trước, không cần SSH:
+
+```bash
+D=movie.deploybox.io.vn
+dig +short $D                                   # phải ra đúng IP VPS
+echo | openssl s_client -connect $D:443 -servername $D 2>/dev/null | openssl x509 -noout -issuer
+curl -sI http://$D | head -1
+```
+
+Rồi SSH vào server. Khối dưới tự tìm container theo domain, nên không cần biết `appName`:
+
+```bash
+D=movie.deploybox.io.vn
+C=$(for c in $(docker ps -aq); do docker inspect $c --format '{{.Name}} {{json .Config.Labels}}' | grep -q "$D" && docker inspect $c --format '{{.Name}}' | tr -d /; done | head -1)
+echo "== container: $C"
+grep -l "$D" /etc/dokploy/traefik/dynamic/*.yml 2>/dev/null   # app loại Application thì domain nằm ở đây
+[ -n "$C" ] && docker ps -a --format '{{.Names}}  {{.Status}}' | grep "$C"
+[ -n "$C" ] && docker inspect $C --format '{{json .Config.Labels}}' | tr ',' '\n' | grep -i traefik
+[ -n "$C" ] && docker inspect $C --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+docker logs dokploy-traefik --tail 300 2>&1 | grep -iE "$D|acme" | tail -10
 ```
 
 | Kết quả | Cách sửa |
 |---|---|
-| `unhealthy` + log báo `Cấu hình môi trường không hợp lệ` | Sửa biến ở tab Environment rồi Deploy lại |
+| Không tìm thấy container, cũng không có file `.yml` | Domain chưa gắn, hoặc gắn rồi chưa **Deploy** lại |
+| Container không `healthy` | Traefik bỏ qua container unhealthy. Quay lại mục 5.4 |
 | Không có label `traefik` | Tab Domains: chọn đúng service và port, rồi **Deploy** lại |
-| Thiếu `dokploy-network` | Deploy lại. Nếu vẫn thiếu, xem mục 8.3 trong [HUONG_DAN_DOKPLOY.md](HUONG_DAN_DOKPLOY.md) |
-| Log Traefik báo lỗi `acme` | DNS chưa trỏ đúng IP, cổng 80 bị chặn, hoặc Cloudflare đang bật proxy |
-| `port is already allocated` lúc deploy | File compose còn `ports:`. Đổi thành `expose:` |
+| Thiếu mạng `dokploy-network` | Deploy lại. Vẫn thiếu thì xem mục 8.3 trong [HUONG_DAN_DOKPLOY.md](HUONG_DAN_DOKPLOY.md) |
+| Log Traefik báo lỗi `acme` với domain này | DNS chưa trỏ đúng IP, cổng 80 bị chặn, hoặc Cloudflare đang bật proxy |
 
-Kiểm tra từ máy mình, không cần SSH:
+Đã chạy lệnh `curl`/`openssl` ở trên thì log Traefik sẽ có dòng `Cannot retrieve the ACME
+challenge ... (token "test")`. Dòng này do chính lệnh kiểm tra tạo ra, bỏ qua được.
+
+### 5.6 Vào được domain nhưng báo `502 Bad Gateway` hoặc `Gateway Timeout`
+
+Traefik đã thấy container nhưng gọi vào không được. Thường do khai sai **Container Port**, hoặc app
+chỉ nghe `127.0.0.1`:
 
 ```bash
-dig +short <domain>
-echo | openssl s_client -connect <domain>:443 -servername <domain> 2>/dev/null | openssl x509 -noout -issuer
+docker exec $C sh -c 'wget -qO- http://127.0.0.1:3000/api/health; echo; env | grep -E "^(PORT|HOSTNAME)="'
+docker run --rm --network dokploy-network curlimages/curl -s -m 5 http://$C:3000/api/health
 ```
+
+Lệnh đầu chạy được mà lệnh sau không: app đang nghe `127.0.0.1`. Đặt `HOSTNAME=0.0.0.0`. Cả hai
+đều chạy được: Container Port trong tab Domains đang khác cổng app thật sự nghe.
+
+### 5.7 Deploy báo xong nhưng web vẫn chạy code cũ
+
+```bash
+git -C /etc/dokploy/compose/$APP/code log --oneline -1     # commit Dokploy đã kéo về
+docker inspect $APP-web-1 --format '{{.Created}}'          # container dựng lúc nào
+```
+
+Commit cũ: chưa push, push nhầm branch, hoặc auto deploy chưa bật. Commit mới mà container cũ:
+bấm Deploy lại. Nếu vẫn thế thì Deployments → **Clear cache**, rồi Deploy lại.
 
 ---
 
